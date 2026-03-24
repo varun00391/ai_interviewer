@@ -1,3 +1,5 @@
+<<<<<<< HEAD
+
 # AI Interviewer & Skill Assessment
 
 An agentic interview platform: multi-round interviews powered by **Groq** LLMs, candidate and admin web UIs, optional email invitations, integrity signals (tab focus, face-match API), and Markdown hiring reports. The backend is **FastAPI** (Python); the frontend is **React**, **Vite**, and **Tailwind CSS**.
@@ -13,7 +15,7 @@ An agentic interview platform: multi-round interviews powered by **Groq** LLMs, 
 | **Admin**     | View all interviews and rounds, filter by scheduled date, send invitations for specific rounds, see scores and outcomes.                                                                                     |
 
 
-Every LLM call is appended to `**prompt.md`** at the repository root (local dev) or `**/app/data/prompt.md**` inside Docker (see environment variables).
+Every LLM call is appended to `**prompt.md`** at the repository root (local dev) or `**/app/data/prompt.md`** inside Docker (see environment variables).
 
 ---
 
@@ -38,7 +40,7 @@ From the **repository root** (where `docker-compose.yml` lives):
   - `GROQ_API_KEY` — your Groq key  
   - `SECRET_KEY` — long random string for JWT signing in production  
   - `PUBLIC_APP_URL` — usually `http://localhost:8080` when using the default compose ports  
-  - `VITE_API_URL` — use **`/api`** (default in Compose) so the UI on port **8080** proxies API calls through nginx to the backend. Avoids CORS issues and the default **1 MB nginx upload limit** that broke large PDF uploads when calling port 8000 directly. For local `npm run dev`, keep `http://127.0.0.1:8000` in `frontend/.env`.
+  - `VITE_API_URL` — use `**/api**` (default in Compose) so the UI on port **8080** proxies API calls through nginx to the backend. Avoids CORS issues and the default **1 MB nginx upload limit** that broke large PDF uploads when calling port 8000 directly. For local `npm run dev`, keep `http://127.0.0.1:8000` in `frontend/.env`.
 2. Build and start:
   ```bash
    docker compose up --build
@@ -175,4 +177,7 @@ ai_interviewer/
 
 ## Security notes
 
-Do not commit real API keys or production `SECRET_KEY` values. Use `.env` files that are listed in `.gitignore`. Replace default admin credentials before any real deployment.
+# Do not commit real API keys or production `SECRET_KEY` values. Use `.env` files that are listed in `.gitignore`. Replace default admin credentials before any real deployment.
+
+
+
