@@ -1,5 +1,7 @@
 # AI Interviewer & Skill Assessment
 
+![AI Interviewer landing page — voice-first hiring practice (hero)](docs/images/landing-hero.png)
+
 An agentic interview platform: multi-round interviews powered by **Groq** LLMs, candidate and admin web UIs, optional email invitations, integrity signals (tab focus, face-match API), and Markdown hiring reports. The backend is **FastAPI** (Python); the frontend is **React**, **Vite**, and **Tailwind CSS**.
 
 ---
