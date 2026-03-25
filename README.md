@@ -9,7 +9,7 @@ An agentic interview platform: multi-round interviews powered by **Groq** LLMs, 
 
 | Role          | Capabilities                                                                                                                                                                                                 |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Candidate** | Register, upload resume (PDF/DOCX or paste; parsed by LLM), create an interview track, start **voice + camera** rounds as soon as they are scheduled (no email required by default), view scores and report. |
+| **Candidate** | Register, sign in, upload resume (**PDF or DOCX**; parsed by LLM), create an interview track, start **voice + camera** rounds as soon as they are scheduled (no email required by default), view scores and report. |
 | **Admin**     | View all interviews and rounds, filter by scheduled date, send invitations for specific rounds, see scores and outcomes.                                                                                     |
 
 
@@ -86,6 +86,19 @@ npm run dev
 
 Dev server defaults to [http://localhost:5173](http://localhost:5173). Ensure backend **CORS** includes that origin (defaults already include `5173` and `8080`).
 
+### Web routes and sign-in
+
+The SPA enforces **client-side auth** for app pages: if there is no JWT in `localStorage`, the UI redirects to **`/login`** and, after a successful login or registration, sends the user back when the original URL was an internal app path (e.g. a bookmarked interview link).
+
+| Area | Paths | Auth |
+|------|--------|------|
+| Marketing | `/` | Public |
+| Auth | `/login`, `/register` | Public |
+| Invitations | `/invite/{token}` | Public (magic link; API calls are unauthenticated) |
+| App | `/candidate`, `/admin`, `/interview/...`, `/report/...` | **Requires sign-in** (token present) |
+
+API routes remain protected by the backend JWT as before; the table above describes what the React router allows users to *see* before they are turned away to the login screen.
+
 ---
 
 ## Default accounts
@@ -103,7 +116,7 @@ Change this in production (create a new admin in the database or adjust seed log
 
 ## Typical flows
 
-1. **Candidate** registers, signs in, uploads resume text, optionally saves a face **embedding** (JSON array of floats; production would use MediaPipe or similar in the browser).
+1. **Candidate** opens the landing page, registers or signs in, uploads a **resume file** (PDF or Word), optionally saves a face **embedding** via the in-browser MediaPipe flow.
 2. **Candidate** creates an interview (job title + number of rounds). The planner uses the **parsed resume** to build the multi-round plan; **round 1 is scheduled immediately** so they can start the voice interview without email.
 3. **Candidate** clicks **Start voice & camera round** (optional `/invite/{token}` flow still exists for admins who want email).
 4. During the session, the UI can send **integrity events** (e.g. tab blur) and **face-check** payloads to the API.
@@ -156,9 +169,10 @@ Notable route groups:
 ```
 ai_interviewer/
 ├── backend/           # FastAPI app (app.main:app)
-├── frontend/          # Vite + React + Tailwind
+├── frontend/          # Vite + React + Tailwind (ProtectedRoute + auth redirect helpers in src/)
 ├── docker-compose.yml
 ├── prompt.md          # LLM prompt/response log (local default location)
+├── process.md         # End-to-end behavior (aligned with code)
 └── README.md
 ```
 
@@ -175,7 +189,7 @@ ai_interviewer/
 
 ## Security notes
 
-# Do not commit real API keys or production `SECRET_KEY` values. Use `.env` files that are listed in `.gitignore`. Replace default admin credentials before any real deployment.
+Do not commit real API keys or production `SECRET_KEY` values. Use `.env` files that are listed in `.gitignore`. Replace default admin credentials before any real deployment. The route guard only checks for a token in the browser; treat expired or forged tokens as handled by the API (401), not by hiding URLs alone.
 
 
 
