@@ -19,11 +19,41 @@ from app.models import (
     User,
     UserRole,
 )
-from app.schemas import ChatMessageIn, IntegrityEventIn, InterviewCreate, InterviewOut, SessionEndIn
+from app.schemas import (
+    ChatMessageIn,
+    ChatMessageOut,
+    IntegrityEventIn,
+    InterviewCreate,
+    InterviewOut,
+    SessionEndIn,
+)
 from app.services.identity import face_match_score
 from app.services.interview_flow import build_interview_from_resume, finalize_session
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
+
+ROUND_QUESTION_CLOSING = (
+    "Thank you—that completes all questions planned for this round. "
+    "When you are ready, tap End and get scores to finish and receive your evaluation."
+)
+
+
+def _interviewer_turn_count(transcript: list) -> int:
+    return sum(1 for m in transcript if isinstance(m, dict) and m.get("role") == "interviewer")
+
+
+def _session_reached_question_closing(transcript: list) -> bool:
+    if not transcript:
+        return False
+    last = transcript[-1]
+    if not isinstance(last, dict) or last.get("role") != "interviewer":
+        return False
+    return str(last.get("content") or "").strip().startswith("Thank you—that completes all questions planned")
+
+
+def _question_cap_for_session(session_id: int) -> int:
+    """Deterministic cap in [7, 10] so each session has a bounded interview length."""
+    return 7 + (session_id % 4)
 
 
 def _require_candidate(user: User) -> None:
@@ -130,7 +160,7 @@ async def start_session(
     return {"session_id": sess.id, "round_id": rr.id}
 
 
-@router.post("/{interview_id}/rounds/{round_id}/sessions/{session_id}/message")
+@router.post("/{interview_id}/rounds/{round_id}/sessions/{session_id}/message", response_model=ChatMessageOut)
 async def post_message(
     interview_id: int,
     round_id: int,
@@ -138,7 +168,7 @@ async def post_message(
     body: ChatMessageIn,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> dict:
+) -> ChatMessageOut:
     _require_candidate(user)
     inv = await db.get(Interview, interview_id)
     if not inv or inv.candidate_id != user.id:
@@ -150,8 +180,31 @@ async def post_message(
     if not sess or sess.round_id != rr.id:
         raise HTTPException(status_code=404, detail="Session not found")
     transcript = list(sess.transcript_json or [])
+
+    if _session_reached_question_closing(transcript):
+        await db.commit()
+        return ChatMessageOut(
+            reply=ROUND_QUESTION_CLOSING,
+            transcript_length=len(transcript),
+            question_limit_reached=True,
+        )
+
     if body.content.strip():
-        transcript.append({"role": "candidate", "content": body.content})
+        transcript.append({"role": "candidate", "content": body.content.strip()})
+
+    cap = _question_cap_for_session(session_id)
+    n_i = _interviewer_turn_count(transcript)
+
+    if n_i >= cap:
+        transcript.append({"role": "interviewer", "content": ROUND_QUESTION_CLOSING})
+        sess.transcript_json = transcript
+        await db.commit()
+        return ChatMessageOut(
+            reply=ROUND_QUESTION_CLOSING,
+            transcript_length=len(transcript),
+            question_limit_reached=True,
+        )
+
     await db.refresh(user, attribute_names=["profile"])
     resume_excerpt = user.profile.resume_text if user.profile else ""
     t_text = "\n".join(f"{m['role']}: {m['content']}" for m in transcript if isinstance(m, dict))
@@ -162,11 +215,13 @@ async def post_message(
         job_title=inv.job_title,
         transcript_so_far=t_text,
         resume_excerpt=resume_excerpt,
+        question_index_one_based=n_i + 1,
+        questions_cap=cap,
     )
     transcript.append({"role": "interviewer", "content": q})
     sess.transcript_json = transcript
     await db.commit()
-    return {"reply": q, "transcript_length": len(transcript)}
+    return ChatMessageOut(reply=q, transcript_length=len(transcript), question_limit_reached=False)
 
 
 @router.post("/{interview_id}/rounds/{round_id}/sessions/{session_id}/integrity")

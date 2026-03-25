@@ -12,6 +12,9 @@ function getSpeechRecognition() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null
 }
 
+/** Pause (ms) with no new speech before we treat the answer as complete and send it. */
+const ANSWER_SILENCE_MS = 2400
+
 export default function VoiceInterviewRoom() {
   const { interviewId, roundId } = useParams()
   const nav = useNavigate()
@@ -25,8 +28,13 @@ export default function VoiceInterviewRoom() {
   const speakingRef = useRef(false)
   const busyRef = useRef(false)
   const techWorkspaceRef = useRef(null)
+  const speechBufferRef = useRef([])
+  const silenceTimerRef = useRef(null)
+  const listenFnRef = useRef(null)
+  const questionCapReachedRef = useRef(false)
 
   const [phase, setPhase] = useState('intro') // intro | loading | enrolling | live | ending | done | error
+  const [questionCapReached, setQuestionCapReached] = useState(false)
   const [statusLine, setStatusLine] = useState('')
   const [lines, setLines] = useState([])
   const [error, setError] = useState('')
@@ -86,6 +94,11 @@ export default function VoiceInterviewRoom() {
         /* */
       }
     }
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+    speechBufferRef.current = []
     speakingRef.current = true
     window.speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(text)
@@ -107,35 +120,59 @@ export default function VoiceInterviewRoom() {
 
   const startListening = useCallback(() => {
     const SR = getSpeechRecognition()
-    if (!SR || speakingRef.current || busyRef.current) return
+    if (!SR || speakingRef.current || busyRef.current || questionCapReachedRef.current) return
+    speechBufferRef.current = []
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
     const rec = new SR()
     rec.continuous = true
     rec.interimResults = false
     rec.lang = 'en-US'
     recognitionRef.current = rec
-    rec.onresult = async (e) => {
+
+    const flushAnswer = async () => {
+      silenceTimerRef.current = null
+      const full = speechBufferRef.current.join(' ').replace(/\s+/g, ' ').trim()
+      speechBufferRef.current = []
+      if (!full || speakingRef.current || busyRef.current) return
+      busyRef.current = true
+      try {
+        try {
+          rec.stop()
+        } catch {
+          /* */
+        }
+        appendLine('candidate', full)
+        const res = await api.sendMessage(iid, rid, sessionRef.current, full)
+        appendLine('interviewer', res.reply)
+        if (res.question_limit_reached) {
+          questionCapReachedRef.current = true
+          setQuestionCapReached(true)
+        }
+        speak(res.reply, () => {
+          busyRef.current = false
+          if (!res.question_limit_reached) {
+            window.setTimeout(() => listenFnRef.current?.(), 400)
+          }
+        })
+      } catch (err) {
+        setError(err.message || 'Message failed')
+        busyRef.current = false
+      }
+    }
+
+    rec.onresult = (e) => {
       let said = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) said += e.results[i][0].transcript
       }
-      const t = said.trim()
-      if (!t || speakingRef.current || busyRef.current) return
-      busyRef.current = true
-      try {
-        rec.stop()
-      } catch {
-        /* */
-      }
-      appendLine('candidate', t)
-      try {
-        const res = await api.sendMessage(iid, rid, sessionRef.current, t)
-        appendLine('interviewer', res.reply)
-        speak(res.reply, () => window.setTimeout(() => startListening(), 400))
-      } catch (err) {
-        setError(err.message || 'Message failed')
-      } finally {
-        busyRef.current = false
-      }
+      const chunk = said.trim()
+      if (!chunk || speakingRef.current || busyRef.current) return
+      speechBufferRef.current.push(chunk)
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = window.setTimeout(flushAnswer, ANSWER_SILENCE_MS)
     }
     rec.onerror = () => {
       /* noisy in some browsers */
@@ -146,6 +183,10 @@ export default function VoiceInterviewRoom() {
       /* */
     }
   }, [iid, rid, speak])
+
+  useEffect(() => {
+    listenFnRef.current = startListening
+  }, [startListening])
 
   useEffect(() => {
     const onVis = () => {
@@ -160,6 +201,10 @@ export default function VoiceInterviewRoom() {
   useEffect(() => {
     return () => {
       window.speechSynthesis.cancel()
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current)
+        silenceTimerRef.current = null
+      }
       if (faceIntervalRef.current) clearInterval(faceIntervalRef.current)
       if (recognitionRef.current) {
         try {
@@ -177,6 +222,8 @@ export default function VoiceInterviewRoom() {
   }, [])
 
   async function runSetup() {
+    questionCapReachedRef.current = false
+    setQuestionCapReached(false)
     setError('')
     setPhase('loading')
     setStatusLine('Requesting camera and microphone…')
@@ -280,14 +327,24 @@ export default function VoiceInterviewRoom() {
     }, 1600)
 
     setPhase('live')
-    setStatusLine('Voice interview — speak after the AI finishes each question.')
+    setStatusLine(
+      getSpeechRecognition()
+        ? 'After each question, answer in full—we only send your reply after you pause for about 2 seconds, so you are not cut off mid-sentence.'
+        : 'Use the text field to answer after each question.',
+    )
     busyRef.current = true
     try {
       const first = await api.sendMessage(iid, rid, sessionRef.current, '')
       appendLine('interviewer', first.reply)
+      if (first.question_limit_reached) {
+        questionCapReachedRef.current = true
+        setQuestionCapReached(true)
+      }
       speak(first.reply, () => {
         busyRef.current = false
-        if (getSpeechRecognition()) window.setTimeout(() => startListening(), 400)
+        if (getSpeechRecognition() && !first.question_limit_reached) {
+          window.setTimeout(() => startListening(), 400)
+        }
       })
     } catch (e) {
       busyRef.current = false
@@ -299,6 +356,11 @@ export default function VoiceInterviewRoom() {
     setPhase('ending')
     setStatusLine('Evaluating your performance…')
     window.speechSynthesis.cancel()
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+    speechBufferRef.current = []
     if (faceIntervalRef.current) {
       clearInterval(faceIntervalRef.current)
       faceIntervalRef.current = null
@@ -431,16 +493,29 @@ export default function VoiceInterviewRoom() {
           {(phase === 'loading' || phase === 'enrolling' || phase === 'ending') && (
             <p className="animate-pulse text-sm text-indigo-300">{statusLine}</p>
           )}
-          {phase === 'live' && <p className="text-sm text-slate-400">{statusLine}</p>}
+          {phase === 'live' && (
+            <div className="text-sm text-slate-400">
+              <p>{statusLine}</p>
+              {questionCapReached && (
+                <p className="mt-2 font-medium text-emerald-400/95">
+                  All planned questions for this round are complete. Tap End and get scores when you are ready.
+                </p>
+              )}
+            </div>
+          )}
 
           {phase === 'live' && !getSpeechRecognition() && (
             <TypeFallback
               iid={iid}
               rid={rid}
               sid={sessionId}
-              onExchange={(userText, reply) => {
+              onExchange={(userText, reply, limitReached) => {
                 appendLine('candidate', userText)
                 appendLine('interviewer', reply)
+                if (limitReached) {
+                  questionCapReachedRef.current = true
+                  setQuestionCapReached(true)
+                }
                 speak(reply, () => {})
               }}
             />
@@ -541,7 +616,7 @@ function TypeFallback({ iid, rid, sid, onExchange }) {
           setText('')
           try {
             const res = await api.sendMessage(iid, rid, sid, t)
-            onExchange(t, res.reply)
+            onExchange(t, res.reply, !!res.question_limit_reached)
           } finally {
             setBusy(false)
           }

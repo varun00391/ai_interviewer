@@ -24,6 +24,9 @@ export default function Login() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
+      <Link to="/" className="mb-6 inline-flex text-sm font-medium text-slate-500 hover:text-indigo-400">
+        ← Back to home
+      </Link>
       <h1 className="mb-2 text-2xl font-semibold text-white">Sign in</h1>
       <p className="mb-6 text-sm text-slate-400">AI Interviewer — candidate or admin</p>
       <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl">

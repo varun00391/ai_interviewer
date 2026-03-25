@@ -87,6 +87,12 @@ class ChatMessageIn(BaseModel):
     content: str = ""
 
 
+class ChatMessageOut(BaseModel):
+    reply: str
+    transcript_length: int = 0
+    question_limit_reached: bool = False
+
+
 class SessionEndIn(BaseModel):
     """Optional payload when ending a session (e.g. technical round workspace)."""
 
