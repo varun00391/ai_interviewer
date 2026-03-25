@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import ProtectedRoute from './components/ProtectedRoute'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -15,10 +16,38 @@ export default function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/candidate" element={<CandidateHome />} />
-        <Route path="/admin" element={<AdminDashboard />} />
-        <Route path="/interview/:interviewId/round/:roundId" element={<VoiceInterviewRoom />} />
-        <Route path="/report/:interviewId" element={<Report />} />
+        <Route
+          path="/candidate"
+          element={
+            <ProtectedRoute>
+              <CandidateHome />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/interview/:interviewId/round/:roundId"
+          element={
+            <ProtectedRoute>
+              <VoiceInterviewRoom />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/report/:interviewId"
+          element={
+            <ProtectedRoute>
+              <Report />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/invite/:token" element={<InviteAccept />} />
       </Routes>
     </BrowserRouter>

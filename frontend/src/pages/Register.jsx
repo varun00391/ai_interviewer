@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { api, setToken } from '../api'
+import { postAuthDestination } from '../authPaths'
 
 export default function Register() {
   const nav = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
@@ -16,7 +18,8 @@ export default function Register() {
       await api.register(email, password, fullName)
       const { access_token } = await api.login(email, password)
       setToken(access_token)
-      nav('/candidate')
+      const fromPath = location.state?.from?.pathname
+      nav(postAuthDestination(fromPath, 'candidate'), { replace: true })
     } catch (x) {
       setErr(x.message)
     }
@@ -67,7 +70,7 @@ export default function Register() {
           Register
         </button>
         <p className="text-center text-sm text-slate-500">
-          <Link to="/login" className="text-indigo-400 hover:underline">
+          <Link to="/login" state={location.state} className="text-indigo-400 hover:underline">
             Back to sign in
           </Link>
         </p>

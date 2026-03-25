@@ -37,6 +37,10 @@ export default function CandidateHome() {
   }, [])
 
   useEffect(() => {
+    window.speechSynthesis?.cancel()
+  }, [])
+
+  useEffect(() => {
     api
       .me()
       .then((u) => {
@@ -182,7 +186,7 @@ export default function CandidateHome() {
         </div>
 
         <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-          <h2 className="text-sm font-semibold tracking-tight text-slate-100">Résumé</h2>
+          <h2 className="text-sm font-semibold tracking-tight text-slate-100">Resume</h2>
           <p className="mt-2 text-sm leading-relaxed text-slate-400">
             PDF or Word{' '}
             <span className="font-medium text-slate-200">.pdf</span>
@@ -232,7 +236,7 @@ export default function CandidateHome() {
               <span>
                 <span className="text-slate-200">Smart multi-round</span>
                 <span className="mt-0.5 block text-xs text-slate-500">
-                  AI plans rounds from your résumé (count below).
+                  AI plans rounds from your resume (count below).
                 </span>
               </span>
             </label>
@@ -347,7 +351,7 @@ export default function CandidateHome() {
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-8 text-center">
               <h2 className="text-xl font-medium text-white">Welcome</h2>
               <p className="mt-3 text-sm text-slate-400">
-                Upload your résumé in the <strong className="text-slate-300">left sidebar</strong> (PDF or Word). We will
+                Upload your resume in the <strong className="text-slate-300">left sidebar</strong> (PDF or Word). We will
                 extract and analyze it, then ask if you want to begin the live voice interview with your camera.
               </p>
             </div>
@@ -355,7 +359,7 @@ export default function CandidateHome() {
 
           {resumeOnFile && (
             <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-b from-indigo-950/40 to-slate-900/40 p-8 shadow-xl">
-              <p className="text-xs font-medium uppercase tracking-wide text-indigo-400">Résumé analyzed</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-indigo-400">Resume analyzed</p>
               <h2 className="mt-2 text-2xl font-semibold text-white">Start your interview?</h2>
               <p className="mt-2 text-sm text-slate-400">
                 If you say <strong className="text-slate-200">yes</strong> or <strong className="text-slate-200">start</strong>{' '}

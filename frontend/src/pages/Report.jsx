@@ -30,6 +30,10 @@ export default function Report() {
   const [err, setErr] = useState('')
 
   useEffect(() => {
+    window.speechSynthesis?.cancel()
+  }, [])
+
+  useEffect(() => {
     const id = Number(interviewId)
     Promise.all([api.report(id).catch(() => ({ markdown: '' })), api.getInterview(id).catch(() => null)])
       .then(([r, interview]) => {

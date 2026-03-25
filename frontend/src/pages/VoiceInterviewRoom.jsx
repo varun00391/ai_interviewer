@@ -32,6 +32,9 @@ export default function VoiceInterviewRoom() {
   const silenceTimerRef = useRef(null)
   const listenFnRef = useRef(null)
   const questionCapReachedRef = useRef(false)
+  /** When false, never start TTS or listening (end interview, unmount, or stale async). */
+  const ttsAllowedRef = useRef(true)
+  const restartListenTimeoutRef = useRef(null)
 
   const [phase, setPhase] = useState('intro') // intro | loading | enrolling | live | ending | done | error
   const [questionCapReached, setQuestionCapReached] = useState(false)
@@ -85,34 +88,82 @@ export default function VoiceInterviewRoom() {
     [iid, rid],
   )
 
-  const speak = useCallback((text, onEnd) => {
-    const SR = getSpeechRecognition()
-    if (SR && recognitionRef.current) {
-      try {
-        recognitionRef.current.stop()
-      } catch {
-        /* */
-      }
+  const clearRestartListenTimeout = useCallback(() => {
+    if (restartListenTimeoutRef.current != null) {
+      clearTimeout(restartListenTimeoutRef.current)
+      restartListenTimeoutRef.current = null
     }
+  }, [])
+
+  const stopAllInterviewAudio = useCallback(() => {
+    ttsAllowedRef.current = false
+    clearRestartListenTimeout()
+    speakingRef.current = false
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current)
       silenceTimerRef.current = null
     }
     speechBufferRef.current = []
-    speakingRef.current = true
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text)
-    u.rate = 1
-    u.onend = () => {
-      speakingRef.current = false
-      onEnd?.()
+    try {
+      const SR = getSpeechRecognition()
+      if (SR && recognitionRef.current) {
+        try {
+          recognitionRef.current.stop()
+        } catch {
+          /* */
+        }
+      }
+    } catch {
+      /* */
     }
-    u.onerror = () => {
-      speakingRef.current = false
-      onEnd?.()
+    const syn = window.speechSynthesis
+    if (syn) {
+      syn.cancel()
+      try {
+        syn.pause()
+      } catch {
+        /* */
+      }
+      syn.cancel()
     }
-    window.speechSynthesis.speak(u)
-  }, [])
+  }, [clearRestartListenTimeout])
+
+  const speak = useCallback(
+    (text, onEnd) => {
+      if (!ttsAllowedRef.current) {
+        speakingRef.current = false
+        queueMicrotask(() => onEnd?.())
+        return
+      }
+      const SR = getSpeechRecognition()
+      if (SR && recognitionRef.current) {
+        try {
+          recognitionRef.current.stop()
+        } catch {
+          /* */
+        }
+      }
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current)
+        silenceTimerRef.current = null
+      }
+      speechBufferRef.current = []
+      speakingRef.current = true
+      window.speechSynthesis.cancel()
+      const u = new SpeechSynthesisUtterance(text)
+      u.rate = 1
+      u.onend = () => {
+        speakingRef.current = false
+        if (ttsAllowedRef.current) onEnd?.()
+      }
+      u.onerror = () => {
+        speakingRef.current = false
+        if (ttsAllowedRef.current) onEnd?.()
+      }
+      window.speechSynthesis.speak(u)
+    },
+    [],
+  )
 
   const appendLine = (role, content) => {
     setLines((prev) => [...prev, { role, content }])
@@ -120,7 +171,7 @@ export default function VoiceInterviewRoom() {
 
   const startListening = useCallback(() => {
     const SR = getSpeechRecognition()
-    if (!SR || speakingRef.current || busyRef.current || questionCapReachedRef.current) return
+    if (!ttsAllowedRef.current || !SR || speakingRef.current || busyRef.current || questionCapReachedRef.current) return
     speechBufferRef.current = []
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current)
@@ -146,6 +197,10 @@ export default function VoiceInterviewRoom() {
         }
         appendLine('candidate', full)
         const res = await api.sendMessage(iid, rid, sessionRef.current, full)
+        if (!ttsAllowedRef.current) {
+          busyRef.current = false
+          return
+        }
         appendLine('interviewer', res.reply)
         if (res.question_limit_reached) {
           questionCapReachedRef.current = true
@@ -153,9 +208,12 @@ export default function VoiceInterviewRoom() {
         }
         speak(res.reply, () => {
           busyRef.current = false
-          if (!res.question_limit_reached) {
-            window.setTimeout(() => listenFnRef.current?.(), 400)
-          }
+          if (!ttsAllowedRef.current || res.question_limit_reached) return
+          clearRestartListenTimeout()
+          restartListenTimeoutRef.current = window.setTimeout(() => {
+            restartListenTimeoutRef.current = null
+            if (ttsAllowedRef.current) listenFnRef.current?.()
+          }, 400)
         })
       } catch (err) {
         setError(err.message || 'Message failed')
@@ -182,7 +240,7 @@ export default function VoiceInterviewRoom() {
     } catch {
       /* */
     }
-  }, [iid, rid, speak])
+  }, [iid, rid, speak, clearRestartListenTimeout])
 
   useEffect(() => {
     listenFnRef.current = startListening
@@ -199,7 +257,19 @@ export default function VoiceInterviewRoom() {
   }, [logIntegrity])
 
   useEffect(() => {
+    ttsAllowedRef.current = true
     return () => {
+      ttsAllowedRef.current = false
+      if (restartListenTimeoutRef.current != null) {
+        clearTimeout(restartListenTimeoutRef.current)
+        restartListenTimeoutRef.current = null
+      }
+      window.speechSynthesis.cancel()
+      try {
+        window.speechSynthesis.pause()
+      } catch {
+        /* */
+      }
       window.speechSynthesis.cancel()
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current)
@@ -222,6 +292,7 @@ export default function VoiceInterviewRoom() {
   }, [])
 
   async function runSetup() {
+    ttsAllowedRef.current = true
     questionCapReachedRef.current = false
     setQuestionCapReached(false)
     setError('')
@@ -335,6 +406,10 @@ export default function VoiceInterviewRoom() {
     busyRef.current = true
     try {
       const first = await api.sendMessage(iid, rid, sessionRef.current, '')
+      if (!ttsAllowedRef.current) {
+        busyRef.current = false
+        return
+      }
       appendLine('interviewer', first.reply)
       if (first.question_limit_reached) {
         questionCapReachedRef.current = true
@@ -342,9 +417,12 @@ export default function VoiceInterviewRoom() {
       }
       speak(first.reply, () => {
         busyRef.current = false
-        if (getSpeechRecognition() && !first.question_limit_reached) {
-          window.setTimeout(() => startListening(), 400)
-        }
+        if (!ttsAllowedRef.current || first.question_limit_reached) return
+        clearRestartListenTimeout()
+        restartListenTimeoutRef.current = window.setTimeout(() => {
+          restartListenTimeoutRef.current = null
+          if (ttsAllowedRef.current && getSpeechRecognition()) startListening()
+        }, 400)
       })
     } catch (e) {
       busyRef.current = false
@@ -353,14 +431,9 @@ export default function VoiceInterviewRoom() {
   }
 
   async function endInterview() {
+    stopAllInterviewAudio()
     setPhase('ending')
     setStatusLine('Evaluating your performance…')
-    window.speechSynthesis.cancel()
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current)
-      silenceTimerRef.current = null
-    }
-    speechBufferRef.current = []
     if (faceIntervalRef.current) {
       clearInterval(faceIntervalRef.current)
       faceIntervalRef.current = null
@@ -451,7 +524,7 @@ export default function VoiceInterviewRoom() {
         ) : (
           <>
             This round is a live conversation: camera for presence and identity checks, transcript of what you say, and
-            back-and-forth with the AI interviewer. Your résumé context is already loaded. Use Chrome or Edge for best
+            back-and-forth with the AI interviewer. Your resume context is already loaded. Use Chrome or Edge for best
             speech support.
           </>
         )}

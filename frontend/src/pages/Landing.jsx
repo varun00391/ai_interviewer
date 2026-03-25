@@ -31,7 +31,7 @@ function Reveal({ children, className = '', delayMs = 0 }) {
 
 const features = [
   {
-    title: 'Résumé-aware interviews',
+    title: 'Resume-aware interviews',
     body: 'Upload PDF or Word. The AI reads your background and tailors HR, technical, and managerial rounds to your role.',
     icon: (
       <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -90,7 +90,7 @@ const plans = [
     price: 'Free',
     period: 'for individuals',
     description: 'Try the full flow on your own schedule—perfect for practice and demos.',
-    features: ['1 active interview track', 'PDF / DOCX résumé upload', 'Voice + camera rounds', 'Basic round report'],
+    features: ['1 active interview track', 'PDF / DOCX resume upload', 'Voice + camera rounds', 'Basic round report'],
     cta: 'Create account',
     href: '/register',
     highlighted: false,
@@ -182,7 +182,7 @@ export default function Landing() {
             <h1 className="mx-auto mt-5 max-w-4xl text-center text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl lg:text-6xl">
               Interview with an AI that actually{' '}
               <span className="bg-gradient-to-r from-indigo-300 via-violet-300 to-cyan-200 bg-clip-text text-transparent">
-                reads your résumé
+                reads your resume
               </span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-center text-lg leading-relaxed text-slate-400 sm:text-xl">
@@ -300,7 +300,7 @@ export default function Landing() {
           <Reveal>
             <div className="mx-auto max-w-3xl rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-500/10 to-transparent px-6 py-12 text-center sm:px-12">
               <h2 className="text-2xl font-bold text-white sm:text-3xl">Ready for your next round?</h2>
-              <p className="mt-3 text-slate-400">Upload your résumé, pick your track, and start when you are.</p>
+              <p className="mt-3 text-slate-400">Upload your resume, pick your track, and start when you are.</p>
               <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row sm:gap-4">
                 <Link
                   to="/register"
