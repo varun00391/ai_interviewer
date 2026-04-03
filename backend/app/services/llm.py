@@ -159,6 +159,108 @@ def _fallback_questions(round_type: str, role: str, count: int) -> list[str]:
     return out[:count]
 
 
+def _default_follow_up_question(round_type: str, question_asked: str) -> str:
+    _ = round_type
+    q = (question_asked or "").strip()[:120]
+    tail = f' Regarding "{q}",' if q else ""
+    return (
+        f"{tail} could you give one concrete example—with what you did, a challenge you hit, "
+        "and a measurable or clear outcome?"
+    ).strip()
+
+
+def decide_follow_up(
+    round_type: str,
+    role_title: str,
+    resume_summary: str,
+    question_text: str,
+    answer_text: str,
+) -> dict[str, Any]:
+    """After a main (non–follow-up) answer, decide whether to ask one clarifying follow-up."""
+    ans = (answer_text or "").strip()
+    if len(ans) < 28:
+        return {
+            "use_follow_up": True,
+            "follow_up_question": _default_follow_up_question(round_type, question_text),
+        }
+
+    vague_markers = (
+        "maybe ",
+        "not sure",
+        "i think ",
+        "kind of",
+        "sort of",
+        "probably ",
+        "i guess",
+        "hard to say",
+    )
+    low = ans.lower()
+    looks_vague = any(m in low for m in vague_markers)
+    if looks_vague and len(ans) < 160:
+        return {
+            "use_follow_up": True,
+            "follow_up_question": _default_follow_up_question(round_type, question_text),
+        }
+
+    if not _client():
+        if len(ans) < 90:
+            return {
+                "use_follow_up": True,
+                "follow_up_question": _default_follow_up_question(round_type, question_text),
+            }
+        return {"use_follow_up": False, "follow_up_question": None}
+
+    schema = """Return JSON only:
+{
+  "use_follow_up": boolean,
+  "follow_up_question": "string or null — one short question only if use_follow_up is true"
+}
+Rules: The round is capped at a small number of questions total—avoid extra questions unless truly needed.
+Ask at most one follow-up per main question. Prefer use_follow_up false unless the answer is clearly thin, generic, or missing specifics. If the answer is adequate, set use_follow_up false and follow_up_question null."""
+
+    data = _chat_json(
+        [
+            {
+                "role": "system",
+                "content": "You are an expert interviewer. Decide if a brief follow-up would materially improve signal.",
+            },
+            {
+                "role": "user",
+                "content": f"""Round type: {round_type}
+Role: {role_title}
+Resume summary (context):
+{(resume_summary or "")[:4000]}
+
+Main question:
+{question_text}
+
+Candidate answer:
+{ans[:6000]}
+
+{schema}""",
+            },
+        ],
+        temperature=0.2,
+    )
+    use_fu = bool(data.get("use_follow_up"))
+    fq = data.get("follow_up_question")
+    fq_s = str(fq).strip() if fq else ""
+    if use_fu and not fq_s:
+        fq_s = _default_follow_up_question(round_type, question_text)
+    if not use_fu:
+        fq_s = ""
+    return {"use_follow_up": bool(use_fu and fq_s), "follow_up_question": fq_s or None}
+
+
+def _normalize_hire_verdict(raw: str | None) -> str:
+    x = (raw or "").lower().replace(" ", "_").replace("-", "_")
+    if x in ("hire", "yes", "strong_hire", "stronghire", "recommended"):
+        return "hire"
+    if x in ("no_hire", "nohire", "no", "reject", "not_recommended", "notrecommended"):
+        return "no_hire"
+    return "borderline"
+
+
 def score_round_answers(
     round_type: str,
     role_title: str,
@@ -166,6 +268,28 @@ def score_round_answers(
     technical_code: str | None,
     whiteboard_note: str | None,
 ) -> dict[str, Any]:
+    if not qa_pairs:
+        z = {
+            "relevance": 0.0,
+            "clarity": 0.0,
+            "depth": 0.0,
+            "structure": 0.0,
+            "technical_accuracy": 0.0,
+        }
+        return {
+            "overall_score": 0.0,
+            "breakdown": z,
+            "improvements": [
+                "No answers were captured for this round before it ended.",
+                "Next time, respond to at least one question (voice or text) before finishing.",
+            ],
+            "analytics": {
+                "strengths": [],
+                "focus_next": ["Submit answers so scoring can reflect your performance"],
+                "estimated_readiness": "Insufficient data",
+            },
+        }
+
     payload = {
         "round": round_type,
         "role": role_title,
@@ -248,11 +372,25 @@ def score_full_interview(
     rounds_summary: list[dict[str, Any]],
 ) -> dict[str, Any]:
     if not _client():
-        scores = [r.get("overall_score") or 7 for r in rounds_summary]
+        scores = [float(r.get("overall_score") or 7) for r in rounds_summary]
         avg = sum(scores) / max(len(scores), 1)
+        if avg >= 7.8:
+            verdict, conf = "hire", min(0.92, 0.55 + (avg - 7) * 0.08)
+        elif avg <= 5.8:
+            verdict, conf = "no_hire", min(0.9, 0.55 + (7 - avg) * 0.08)
+        else:
+            verdict, conf = "borderline", 0.55
         return {
             "overall_score": round(avg, 1),
             "summary": "Solid performance across rounds. Keep practicing structured answers.",
+            "hire_recommendation": {
+                "verdict": verdict,
+                "confidence": round(conf, 2),
+                "rationale": (
+                    f"Practice-mode synthesis from average round score ({avg:.1f}/10). "
+                    "This is illustrative only—not a substitute for human hiring decisions."
+                ),
+            },
             "analytics": {
                 "trend": "Stable",
                 "best_round": rounds_summary[0].get("round") if rounds_summary else "n/a",
@@ -268,7 +406,10 @@ def score_full_interview(
         [
             {
                 "role": "system",
-                "content": "You synthesize multi-round interview results for a candidate.",
+                "content": (
+                    "You synthesize multi-round interview results for hiring stakeholders. "
+                    "Be fair and evidence-based; note this is AI-assisted practice, not a legal hiring decision."
+                ),
             },
             {
                 "role": "user",
@@ -280,6 +421,11 @@ Return JSON only:
 {{
   "overall_score": number 0-10,
   "summary": "2-3 sentences",
+  "hire_recommendation": {{
+    "verdict": "hire" | "no_hire" | "borderline",
+    "confidence": number 0-1,
+    "rationale": "2-4 sentences for a hiring manager: why this verdict, key strengths/risks, and what would change your mind."
+  }},
   "analytics": {{
     "trend": "string",
     "best_round": "hr|technical|managerial",
@@ -291,9 +437,42 @@ Return JSON only:
         ],
         temperature=0.2,
     )
-    return data if data.get("overall_score") is not None else {
-        "overall_score": 7.0,
-        "summary": "Review individual round scores.",
-        "analytics": {},
-        "improvements": [],
-    }
+    if data.get("overall_score") is None:
+        return {
+            "overall_score": 7.0,
+            "summary": "Review individual round scores.",
+            "hire_recommendation": {
+                "verdict": "borderline",
+                "confidence": 0.5,
+                "rationale": "Insufficient data to complete synthesis.",
+            },
+            "analytics": {},
+            "improvements": [],
+        }
+
+    hr = data.get("hire_recommendation")
+    if not isinstance(hr, dict):
+        avg = float(data.get("overall_score") or 7)
+        if avg >= 7.5:
+            v = "hire"
+        elif avg <= 6.0:
+            v = "no_hire"
+        else:
+            v = "borderline"
+        data["hire_recommendation"] = {
+            "verdict": v,
+            "confidence": 0.55,
+            "rationale": data.get("summary") or "See summary above.",
+        }
+    else:
+        hr["verdict"] = _normalize_hire_verdict(hr.get("verdict"))
+        try:
+            c = float(hr.get("confidence", 0.6))
+        except (TypeError, ValueError):
+            c = 0.6
+        hr["confidence"] = max(0.0, min(1.0, c))
+        hr["rationale"] = str(hr.get("rationale") or "").strip() or (
+            str(data.get("summary") or "See overall summary.")
+        )
+        data["hire_recommendation"] = hr
+    return data

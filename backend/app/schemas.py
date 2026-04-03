@@ -83,6 +83,7 @@ class SessionOut(BaseModel):
     disqualified: bool | None = None
     disqualify_reason: str | None = None
     integrity_score: float | None = None
+    hire_recommendation: dict[str, Any] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

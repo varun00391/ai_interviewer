@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     silence_ms_hint: int = 5000
     questions_per_round_min: int = 5
     questions_per_round_max: int = 7
+    # Main questions are 5–7; follow-ups may add more but total per round never exceeds this.
+    max_questions_per_round_total: int = 9
 
     integrity_warn_severity: float = 6.0
     integrity_disqualify_severity: float = 8.5

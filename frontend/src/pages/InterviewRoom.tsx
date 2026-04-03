@@ -4,17 +4,21 @@ import { Link, useParams } from "react-router-dom";
 import {
   PolarAngleAxis,
   PolarGrid,
+  PolarRadiusAxis,
   Radar,
   RadarChart,
   ResponsiveContainer,
 } from "recharts";
 import { loadStoredToken, wsInterviewUrl } from "../api";
+import { StructuredInsight } from "../components/StructuredInsight";
 import Whiteboard from "../components/Whiteboard";
 
 type ChatLine = { role: "user" | "assistant"; text: string };
 
 const SILENCE_MS = 5000;
 const CAMERA_INTERVAL_MS = 8000;
+/** Let TTS release the audio device before starting Web Speech (Chrome / Safari). */
+const POST_TTS_LISTEN_MS = 400;
 
 export default function InterviewRoom() {
   const { sessionId, round } = useParams();
@@ -37,14 +41,21 @@ export default function InterviewRoom() {
   const [camLabel, setCamLabel] = useState<string>("");
   const [integrityMsg, setIntegrityMsg] = useState<string | null>(null);
   const [dqReason, setDqReason] = useState<string | null>(null);
+  const [roundLive, setRoundLive] = useState(false);
+  const [finishing, setFinishing] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const recRef = useRef<SpeechRecognition | null>(null);
   const committedRef = useRef("");
+  const liveTranscriptRef = useRef("");
+  const manualTextRef = useRef("");
+  const ignoreWsRef = useRef(false);
+  const postTtsListenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expectingAnswerRef = useRef(false);
   const roundActiveRef = useRef(false);
+  const finishingRef = useRef(false);
   const codeRef = useRef(code);
   const wbRef = useRef(wb);
   const roundTypeRef = useRef(roundType);
@@ -103,8 +114,10 @@ export default function InterviewRoom() {
     w.send(JSON.stringify({ type: "user_final", text }));
     setLines((prev) => [...prev, { role: "user", text }]);
     committedRef.current = "";
+    liveTranscriptRef.current = "";
     setLive("");
     setManualText("");
+    manualTextRef.current = "";
     expectingAnswerRef.current = false;
     stopRec();
   }, [manualText, sendSnapshot, stopRec]);
@@ -145,7 +158,8 @@ export default function InterviewRoom() {
         else interim += piece;
       }
       if (finalChunk) committedRef.current += finalChunk;
-      setLive(committedRef.current + interim);
+      liveTranscriptRef.current = committedRef.current + interim;
+      setLive(liveTranscriptRef.current);
       resetSilence();
     };
     rec.onerror = (ev) => {
@@ -184,13 +198,51 @@ export default function InterviewRoom() {
   const startListeningRef = useRef(startListening);
   startListeningRef.current = startListening;
 
+  const finishInterview = useCallback(() => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN || finishingRef.current) return;
+    finishingRef.current = true;
+    setFinishing(true);
+    if (postTtsListenTimerRef.current) {
+      clearTimeout(postTtsListenTimerRef.current);
+      postTtsListenTimerRef.current = null;
+    }
+    window.speechSynthesis.cancel();
+    stopRec();
+    let partial = "";
+    if (expectingAnswerRef.current) {
+      if (useTextFallbackRef.current) {
+        partial = manualTextRef.current.trim();
+      } else {
+        partial =
+          liveTranscriptRef.current.trim() || committedRef.current.trim();
+      }
+    }
+    setStatus("Wrapping up and scoring your interview…");
+    w.send(
+      JSON.stringify({
+        type: "finish_interview",
+        partial_answer: partial || null,
+        end_session: true,
+      })
+    );
+    expectingAnswerRef.current = false;
+    committedRef.current = "";
+    liveTranscriptRef.current = "";
+    setLive("");
+    setManualText("");
+    manualTextRef.current = "";
+  }, [stopRec]);
+
   useEffect(() => {
     const token = loadStoredToken();
     if (!token) return;
     const url = wsInterviewUrl(token);
     const ws = new WebSocket(url);
     wsRef.current = ws;
+    ignoreWsRef.current = false;
     ws.onopen = () => {
+      if (ignoreWsRef.current) return;
       setStatus("Starting round…");
       ws.send(
         JSON.stringify({
@@ -201,14 +253,20 @@ export default function InterviewRoom() {
       );
     };
     ws.onmessage = (ev) => {
+      if (ignoreWsRef.current) return;
       const data = JSON.parse(ev.data) as Record<string, unknown>;
       const t = data.type as string;
       if (t === "error") {
+        finishingRef.current = false;
+        setFinishing(false);
         setStatus(String(data.detail || "Error"));
         return;
       }
       if (t === "disqualified") {
         roundActiveRef.current = false;
+        setRoundLive(false);
+        finishingRef.current = false;
+        setFinishing(false);
         setDqReason(String(data.reason || "Session ended."));
         window.speechSynthesis.cancel();
         stopRec();
@@ -217,6 +275,9 @@ export default function InterviewRoom() {
       }
       if (t === "app_locked") {
         roundActiveRef.current = false;
+        setRoundLive(false);
+        finishingRef.current = false;
+        setFinishing(false);
         setDqReason(
           String(
             data.detail ||
@@ -244,9 +305,13 @@ export default function InterviewRoom() {
         setContinueHint(null);
         setIntegrityMsg(null);
         setDqReason(null);
+        finishingRef.current = false;
+        setFinishing(false);
         roundActiveRef.current = true;
+        setRoundLive(true);
         expectingAnswerRef.current = false;
         committedRef.current = "";
+        liveTranscriptRef.current = "";
         setLive("");
         setStatus(
           `Question 1 of ${Number(data.total_questions) || ""}. Listen to the interviewer first.`
@@ -255,27 +320,53 @@ export default function InterviewRoom() {
       }
       if (t === "ai_message" && data.is_question) {
         const text = String(data.text || "");
+        const tot = Number(data.total_questions);
+        const qi = Number(data.question_index);
+        const isFu = Boolean(data.is_follow_up);
+        if (Number.isFinite(tot) && Number.isFinite(qi)) {
+          setStatus(
+            isFu
+              ? `Follow-up (question ${qi + 1} of ${tot}). Listen, then respond.`
+              : `Question ${qi + 1} of ${tot}. Listen to the interviewer first.`
+          );
+        }
         expectingAnswerRef.current = false;
         committedRef.current = "";
+        liveTranscriptRef.current = "";
         setLive("");
         window.speechSynthesis.cancel();
         stopRec();
         speakThen(text, () => {
           expectingAnswerRef.current = true;
-          if (!useTextFallbackRef.current) {
-            startListeningRef.current();
-          } else {
+          if (useTextFallbackRef.current) {
             setStatus("Type your answer, then tap Send answer.");
+            return;
           }
+          if (postTtsListenTimerRef.current) {
+            clearTimeout(postTtsListenTimerRef.current);
+          }
+          postTtsListenTimerRef.current = window.setTimeout(() => {
+            postTtsListenTimerRef.current = null;
+            if (ignoreWsRef.current || !expectingAnswerRef.current) return;
+            setStatus("Listening… pause ~5s after speaking to send your answer.");
+            startListeningRef.current();
+          }, POST_TTS_LISTEN_MS);
         });
         return;
       }
       if (t === "round_complete") {
         setRoundDone(data);
         roundActiveRef.current = false;
+        setRoundLive(false);
+        finishingRef.current = false;
+        setFinishing(false);
         expectingAnswerRef.current = false;
         window.speechSynthesis.cancel();
         stopRec();
+        if (postTtsListenTimerRef.current) {
+          clearTimeout(postTtsListenTimerRef.current);
+          postTtsListenTimerRef.current = null;
+        }
         setStatus("Round complete. Review your results below.");
         return;
       }
@@ -287,16 +378,28 @@ export default function InterviewRoom() {
         setAllDone(data);
         setContinueHint(null);
         roundActiveRef.current = false;
+        setRoundLive(false);
+        finishingRef.current = false;
+        setFinishing(false);
+        setStatus("Interview finished.");
         return;
       }
     };
     ws.onclose = () => {
       roundActiveRef.current = false;
+      setRoundLive(false);
+      finishingRef.current = false;
+      setFinishing(false);
       setStatus((s) =>
-        /integrity|Session stopped/i.test(s) ? s : "Disconnected."
+        /integrity|Session stopped|Wrapping up|paused/i.test(s) ? s : "Disconnected."
       );
     };
     return () => {
+      ignoreWsRef.current = true;
+      if (postTtsListenTimerRef.current) {
+        clearTimeout(postTtsListenTimerRef.current);
+        postTtsListenTimerRef.current = null;
+      }
       ws.close();
       window.speechSynthesis.cancel();
       stopRec();
@@ -388,11 +491,35 @@ export default function InterviewRoom() {
   return (
     <div className="min-h-screen bg-surface">
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
+        {allDone && (
+          <div
+            className="rounded-2xl px-4 py-3.5 text-center shadow-md border border-emerald-400/30 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white"
+            role="status"
+          >
+            <div className="font-display text-lg font-bold tracking-tight">Interview finished</div>
+            <p className="text-sm text-emerald-50/95 mt-0.5">
+              Your full interview is complete. Review your summary and scores below.
+            </p>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-3 items-center justify-between">
           <Link to={`/app/session/${sid}`} className="text-sm text-accent font-medium">
             ← Back
           </Link>
-          <div className="text-xs text-mist">{roundTitle}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-xs text-mist">{roundTitle}</div>
+            {roundLive && !roundDone && !allDone && (
+              <button
+                type="button"
+                disabled={finishing}
+                onClick={finishInterview}
+                className="text-xs font-semibold px-3 py-1.5 rounded-full border border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100 disabled:opacity-50"
+              >
+                {finishing ? "Finishing…" : "Finish interview"}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="glass rounded-2xl p-3 flex flex-wrap gap-3 items-center">
@@ -450,7 +577,11 @@ export default function InterviewRoom() {
                   className="w-full rounded-xl border border-slate-200 p-2 text-sm min-h-[90px]"
                   placeholder="Type your answer"
                   value={manualText}
-                  onChange={(e) => setManualText(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    manualTextRef.current = v;
+                    setManualText(v);
+                  }}
                 />
                 <button
                   type="button"
@@ -520,6 +651,12 @@ export default function InterviewRoom() {
             <h3 className="font-display text-lg font-semibold text-ink">
               Your round results
             </h3>
+            {roundDone.early_exit === true && (
+              <p className="text-sm rounded-xl border border-amber-200 bg-amber-50 text-amber-950 px-3 py-2">
+                You ended this round early. Scores reflect only the answers recorded up to that
+                point.
+              </p>
+            )}
             <div className="grid md:grid-cols-2 gap-6">
               <div>
                 <div className="text-4xl font-bold text-accent">
@@ -529,17 +666,57 @@ export default function InterviewRoom() {
                 <p className="text-sm text-mist mt-2">Overall score for this round.</p>
               </div>
               {radarData.length > 0 && (
-                <div className="h-56">
+                <div className="h-64 rounded-2xl border border-slate-200/90 bg-gradient-to-br from-slate-50 via-white to-indigo-50/40 p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8)]">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1 text-center">
+                    Competency profile
+                  </div>
                   <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart data={radarData}>
-                      <PolarGrid />
-                      <PolarAngleAxis dataKey="dim" tick={{ fontSize: 10 }} />
+                    <RadarChart cx="50%" cy="52%" outerRadius="72%" data={radarData}>
+                      <defs>
+                        <linearGradient id="radarStroke" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#4f46e5" stopOpacity={1} />
+                          <stop offset="100%" stopColor="#a855f7" stopOpacity={1} />
+                        </linearGradient>
+                        <radialGradient id="radarFill" cx="50%" cy="50%" r="50%">
+                          <stop offset="0%" stopColor="#818cf8" stopOpacity={0.5} />
+                          <stop offset="70%" stopColor="#6366f1" stopOpacity={0.15} />
+                          <stop offset="100%" stopColor="#6366f1" stopOpacity={0.05} />
+                        </radialGradient>
+                      </defs>
+                      <PolarGrid
+                        gridType="polygon"
+                        stroke="#cbd5e1"
+                        strokeWidth={0.75}
+                        radialLines
+                      />
+                      <PolarAngleAxis
+                        dataKey="dim"
+                        tick={{ fill: "#334155", fontSize: 11, fontWeight: 600 }}
+                        tickLine={false}
+                      />
+                      <PolarRadiusAxis
+                        angle={90}
+                        domain={[0, 10]}
+                        tickCount={6}
+                        tick={{ fill: "#94a3b8", fontSize: 9 }}
+                        axisLine={false}
+                        stroke="#e2e8f0"
+                      />
                       <Radar
                         name="Score"
                         dataKey="score"
-                        stroke="#6366f1"
-                        fill="#6366f1"
-                        fillOpacity={0.35}
+                        stroke="url(#radarStroke)"
+                        strokeWidth={2.5}
+                        fill="url(#radarFill)"
+                        fillOpacity={1}
+                        dot={{
+                          r: 5,
+                          fill: "#4f46e5",
+                          stroke: "#fff",
+                          strokeWidth: 2,
+                        }}
+                        activeDot={{ r: 6, strokeWidth: 2 }}
+                        isAnimationActive
                       />
                     </RadarChart>
                   </ResponsiveContainer>
@@ -559,11 +736,8 @@ export default function InterviewRoom() {
               </div>
             )}
             {roundDone.analytics && typeof roundDone.analytics === "object" && (
-              <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm text-mist">
-                <div className="font-semibold text-ink mb-2">Quick analytics</div>
-                <pre className="whitespace-pre-wrap text-xs">
-                  {JSON.stringify(roundDone.analytics, null, 2)}
-                </pre>
+              <div className="rounded-2xl bg-gradient-to-b from-slate-50 to-white border border-slate-200/90 p-6 shadow-sm">
+                <StructuredInsight data={roundDone.analytics} title="Round insights" />
               </div>
             )}
           </div>
@@ -588,6 +762,77 @@ export default function InterviewRoom() {
             <h3 className="font-display text-lg font-semibold text-ink">
               Full interview wrap-up
             </h3>
+            {allDone.session_ended_early === true && (
+              <p className="text-xs text-mist rounded-lg bg-slate-100 border border-slate-200 px-3 py-2">
+                You ended the interview early. This summary uses only the rounds and answers
+                completed before you stopped.
+              </p>
+            )}
+            {allDone.hire_recommendation &&
+              typeof allDone.hire_recommendation === "object" &&
+              allDone.hire_recommendation !== null && (
+                <div
+                  className={`rounded-2xl border-2 p-4 space-y-2 ${
+                    String(
+                      (allDone.hire_recommendation as Record<string, unknown>).verdict
+                    ) === "hire"
+                      ? "border-emerald-300 bg-emerald-50/80"
+                      : String(
+                            (allDone.hire_recommendation as Record<string, unknown>).verdict
+                          ) === "no_hire"
+                        ? "border-rose-300 bg-rose-50/80"
+                        : "border-amber-300 bg-amber-50/80"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wide text-mist">
+                      Hiring recommendation (AI-assisted)
+                    </span>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${
+                        String(
+                          (allDone.hire_recommendation as Record<string, unknown>).verdict
+                        ) === "hire"
+                          ? "bg-emerald-600 text-white"
+                          : String(
+                                (allDone.hire_recommendation as Record<string, unknown>).verdict
+                              ) === "no_hire"
+                            ? "bg-rose-600 text-white"
+                            : "bg-amber-600 text-white"
+                      }`}
+                    >
+                      {String(
+                        (allDone.hire_recommendation as Record<string, unknown>).verdict ||
+                          "borderline"
+                      ).replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  {(() => {
+                    const c = Number(
+                      (allDone.hire_recommendation as Record<string, unknown>).confidence
+                    );
+                    if (!Number.isFinite(c)) return null;
+                    return (
+                      <div className="text-xs text-mist">
+                        Confidence:{" "}
+                        <span className="font-semibold text-ink">
+                          {(c * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  {(allDone.hire_recommendation as Record<string, unknown>).rationale && (
+                    <p className="text-sm text-ink leading-relaxed">
+                      {String(
+                        (allDone.hire_recommendation as Record<string, unknown>).rationale
+                      )}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-mist leading-snug">
+                    Practice-only signal—not a substitute for human review or fair hiring process.
+                  </p>
+                </div>
+              )}
             <div className="text-3xl font-bold text-accent">
               {Number(allDone.overall_score).toFixed(1)}
               <span className="text-base text-mist font-medium"> / 10 overall</span>
@@ -608,9 +853,9 @@ export default function InterviewRoom() {
               </div>
             )}
             {allDone.analytics && typeof allDone.analytics === "object" && (
-              <pre className="text-xs text-mist whitespace-pre-wrap bg-slate-50 rounded-xl p-3 border border-slate-200">
-                {JSON.stringify(allDone.analytics, null, 2)}
-              </pre>
+              <div className="rounded-2xl bg-gradient-to-b from-slate-50 to-white border border-slate-200/90 p-6 shadow-sm">
+                <StructuredInsight data={allDone.analytics} title="Overall insights" />
+              </div>
             )}
             <Link
               to="/app"

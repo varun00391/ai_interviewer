@@ -71,6 +71,7 @@ class InterviewSession(Base):
     disqualify_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     integrity_score: Mapped[float] = mapped_column(Float, default=0.0)
     integrity_events: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    hire_recommendation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
