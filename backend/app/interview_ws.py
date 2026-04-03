@@ -4,7 +4,7 @@ import secrets
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from app.models import (
 )
 from app.services.integrity import analyze_interview_frame_jpeg_b64
 from app.services.llm import generate_questions, score_full_interview, score_round_answers
+from app.services.subscription import assert_app_access_allowed
 
 router = APIRouter()
 
@@ -99,6 +100,19 @@ async def interview_ws(websocket: WebSocket):
                 if not user:
                     await _send(websocket, {"type": "error", "detail": "user missing"})
                     break
+
+                if mtype != "ping" and not user.is_admin:
+                    try:
+                        assert_app_access_allowed(user, db)
+                    except HTTPException as e:
+                        detail = e.detail
+                        msg = detail if isinstance(detail, str) else "Access denied"
+                        await _send(
+                            websocket,
+                            {"type": "app_locked", "detail": msg},
+                        )
+                        await websocket.close(code=4403)
+                        return
 
                 if mtype == "camera_frame":
                     session_id = int(msg.get("session_id") or 0)

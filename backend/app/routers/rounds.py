@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import require_app_unlocked
 from app.models import InterviewRound, InterviewSession, User
 from app.schemas import RoundOut
 
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/sessions", tags=["rounds"])
 def list_my_rounds(
     session_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_app_unlocked),
 ):
     s = (
         db.query(InterviewSession)

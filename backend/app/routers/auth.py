@@ -8,7 +8,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models import User
 from app.schemas import LoginRequest, Token, UserCreate, UserMeOut
-from app.services.subscription import user_me_payload
+from app.services.subscription import allocate_username, user_me_payload
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -22,8 +22,12 @@ def register(body: UserCreate, db: Session = Depends(get_db)):
     if tier in ("standard", "enterprise"):
         starts = datetime.utcnow()
         ends = starts + timedelta(days=30)
+    raw_u = (body.username or "").strip()
+    uname = raw_u if raw_u else None
+    username = allocate_username(db, body.email, uname)
     user = User(
         email=body.email,
+        username=username,
         hashed_password=hash_password(body.password),
         full_name=body.full_name,
         is_admin=False,

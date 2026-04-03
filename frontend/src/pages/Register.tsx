@@ -16,6 +16,7 @@ export default function Register() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -32,7 +33,13 @@ export default function Register() {
     setErr(null);
     setBusy(true);
     try {
-      await register(email, password, fullName || undefined, plan);
+      await register(
+        email,
+        password,
+        fullName || undefined,
+        plan,
+        username || undefined
+      );
       nav("/app");
     } catch {
       setErr("Could not create your account. That email may already be in use.");
@@ -63,6 +70,21 @@ export default function Register() {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
             />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">
+              Username (optional)
+            </label>
+            <input
+              className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2.5 text-sm text-white outline-none focus:ring-2 focus:ring-fuchsia-500/50"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Letters, numbers, underscore — or we pick one from your email"
+              autoComplete="username"
+            />
+            <p className="text-[10px] text-slate-500 mt-1">
+              Shown in admin; must be unique if you set it.
+            </p>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-400 mb-1">

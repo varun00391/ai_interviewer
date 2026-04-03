@@ -54,6 +54,8 @@ def list_users(db: Session = Depends(get_db), _: User = Depends(require_admin)):
             AdminUserSummary(
                 id=u.id,
                 email=u.email,
+                username=u.username,
+                password_storage="bcrypt hash (password never stored as plain text)",
                 full_name=u.full_name,
                 is_admin=u.is_admin,
                 created_at=u.created_at,

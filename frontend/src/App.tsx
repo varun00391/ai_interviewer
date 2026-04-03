@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
+import AccountLocked from "./pages/AccountLocked";
 import AdminDashboard from "./pages/AdminDashboard";
 import Dashboard from "./pages/Dashboard";
 import InterviewPrep from "./pages/InterviewPrep";
@@ -18,6 +19,9 @@ function Private({ children }: { children: React.ReactNode }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  if (user.app_access_blocked && !user.is_admin) {
+    return <AccountLocked />;
+  }
   return <>{children}</>;
 }
 

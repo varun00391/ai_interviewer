@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import require_app_unlocked
 from app.models import InterviewSession, InterviewRound, SessionStatus, User
 from app.schemas import SessionCreate, SessionOut, SessionUpdate
 from app.services.llm import summarize_resume
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 def create_session(
     body: SessionCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_app_unlocked),
 ):
     assert_can_create_session(db, user)
     mode = "full" if body.flow_type == "full" else "per_round"
@@ -44,7 +44,7 @@ def create_session(
 @router.get("", response_model=list[SessionOut])
 def list_sessions(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_app_unlocked),
 ):
     q = db.query(InterviewSession).filter(InterviewSession.user_id == user.id)
     return q.order_by(InterviewSession.created_at.desc()).all()
@@ -54,7 +54,7 @@ def list_sessions(
 def get_session(
     session_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_app_unlocked),
 ):
     s = (
         db.query(InterviewSession)
@@ -71,7 +71,7 @@ def update_session(
     session_id: int,
     body: SessionUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_app_unlocked),
 ):
     s = (
         db.query(InterviewSession)
@@ -106,7 +106,7 @@ async def upload_resume(
     session_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_app_unlocked),
 ):
     s = (
         db.query(InterviewSession)

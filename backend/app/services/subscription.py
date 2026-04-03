@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -35,6 +36,55 @@ def effective_tier(user: User) -> str:
         if end and utc_now_naive() > end:
             return "free"
     return tier
+
+
+def allocate_username(db: Session, email: str, requested: str | None) -> str:
+    existing = db.query(User).filter(User.email == email).first()
+    if existing and existing.username:
+        return existing.username
+    raw = (requested or email.split("@")[0]).strip()
+    base = re.sub(r"[^a-zA-Z0-9_]", "_", raw)[:40].strip("_") or "user"
+    cand = base
+    n = 0
+    while db.query(User.id).filter(User.username == cand).first():
+        n += 1
+        cand = f"{base}_{n}"
+    return cand
+
+
+def backfill_missing_usernames(db: Session) -> None:
+    for u in db.query(User).filter(User.username.is_(None)).all():
+        u.username = allocate_username(db, u.email, None)
+    db.commit()
+
+
+def app_access_blocked(user: User, db: Session) -> tuple[bool, str | None]:
+    if user.is_admin:
+        return False, None
+    stored = (user.subscription_tier or "free").lower()
+    end = _as_utc_naive(user.subscription_ends_at)
+    if stored in ("standard", "enterprise") and end is not None:
+        if utc_now_naive() > end:
+            return True, (
+                "Your monthly subscription has ended. Start a subscription again to regain "
+                "access to InterviewAI."
+            )
+    if stored == "free":
+        total = count_sessions_total(db, user.id)
+        if total >= FREE_TOTAL_INTERVIEWS:
+            return True, (
+                "Your free interview quota is finished. Start a subscription again to continue "
+                "using InterviewAI."
+            )
+    return False, None
+
+
+def assert_app_access_allowed(user: User, db: Session) -> None:
+    from fastapi import HTTPException
+
+    blocked, msg = app_access_blocked(user, db)
+    if blocked:
+        raise HTTPException(status_code=403, detail=msg or "Access denied")
 
 
 def count_sessions_total(db: Session, user_id: int) -> int:
@@ -127,9 +177,12 @@ def user_me_payload(user: User, db: Session) -> dict[str, Any]:
     elif tier == "enterprise":
         daily_limit = ENTERPRISE_DAILY
 
+    blocked, lock_msg = app_access_blocked(user, db)
+
     return {
         "id": user.id,
         "email": user.email,
+        "username": user.username,
         "is_admin": user.is_admin,
         "full_name": user.full_name,
         "created_at": user.created_at,
@@ -141,4 +194,6 @@ def user_me_payload(user: User, db: Session) -> dict[str, Any]:
         "interviews_today": today,
         "interviews_total_limit": total_limit,
         "interviews_daily_limit": daily_limit,
+        "app_access_blocked": blocked,
+        "app_access_message": lock_msg,
     }

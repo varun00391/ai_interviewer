@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth_utils import decode_token
 from app.database import get_db
 from app.models import User
+from app.services.subscription import assert_app_access_allowed
 
 security = HTTPBearer(auto_error=False)
 
@@ -39,4 +40,12 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin only",
         )
+    return user
+
+
+def require_app_unlocked(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    assert_app_access_allowed(user, db)
     return user

@@ -12,6 +12,7 @@ import { api, loadStoredToken, setAuthToken } from "../api";
 export type AuthUser = {
   id: number;
   email: string;
+  username: string | null;
   is_admin: boolean;
   full_name: string | null;
   created_at: string;
@@ -23,6 +24,8 @@ export type AuthUser = {
   interviews_today: number;
   interviews_total_limit: number | null;
   interviews_daily_limit: number | null;
+  app_access_blocked: boolean;
+  app_access_message: string | null;
 };
 
 type Ctx = {
@@ -33,7 +36,8 @@ type Ctx = {
     email: string,
     password: string,
     fullName?: string,
-    subscriptionPlan?: string
+    subscriptionPlan?: string,
+    username?: string
   ) => Promise<void>;
   refresh: () => Promise<void>;
   logout: () => void;
@@ -84,13 +88,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: string,
       password: string,
       fullName?: string,
-      subscriptionPlan?: string
+      subscriptionPlan?: string,
+      username?: string
     ) => {
+      const u = (username || "").trim();
       await api.post("/auth/register", {
         email,
         password,
         full_name: fullName || null,
         subscription_plan: subscriptionPlan || "free",
+        username: u ? u : null,
       });
       await login(email, password);
     },

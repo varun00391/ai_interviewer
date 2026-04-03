@@ -11,6 +11,7 @@ from app.interview_ws import router as ws_router
 from app.migrate import run_sql_migrations
 from app.models import User
 from app.routers import admin, auth, rounds, sessions, subscriptions
+from app.services.subscription import allocate_username, backfill_missing_usernames
 
 app = FastAPI(title="InterviewAI API", version="1.0.0")
 
@@ -43,6 +44,7 @@ def on_startup():
             db.add(
                 User(
                     email=admin_email,
+                    username="admin",
                     hashed_password=hash_password("admin123"),
                     is_admin=True,
                     full_name="Administrator",
@@ -63,6 +65,13 @@ def on_startup():
                 u.subscription_starts_at = u.subscription_starts_at or datetime.utcnow()
                 u.subscription_ends_at = datetime(2099, 12, 31, 23, 59, 59)
                 db.commit()
+            if not u.username:
+                u.username = allocate_username(db, u.email, "admin")
+                db.commit()
+        try:
+            backfill_missing_usernames(db)
+        except Exception:
+            db.rollback()
     finally:
         db.close()
 

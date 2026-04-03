@@ -215,6 +215,19 @@ export default function InterviewRoom() {
         setStatus("Session stopped — integrity review.");
         return;
       }
+      if (t === "app_locked") {
+        roundActiveRef.current = false;
+        setDqReason(
+          String(
+            data.detail ||
+              "Your subscription or free quota has ended. Renew to continue."
+          )
+        );
+        window.speechSynthesis.cancel();
+        stopRec();
+        setStatus("Access paused — renew your plan.");
+        return;
+      }
       if (t === "integrity_update") {
         const sev = Number(data.severity);
         const flags = Array.isArray(data.flags) ? (data.flags as string[]).join(", ") : "";

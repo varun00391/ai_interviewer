@@ -13,6 +13,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
     full_name: str | None = None
+    username: str | None = Field(default=None, max_length=80)
     subscription_plan: str = Field(
         default="free",
         pattern="^(free|standard|enterprise)$",
@@ -22,6 +23,7 @@ class UserCreate(BaseModel):
 class UserMeOut(BaseModel):
     id: int
     email: str
+    username: str | None
     is_admin: bool
     full_name: str | None
     created_at: datetime
@@ -33,6 +35,8 @@ class UserMeOut(BaseModel):
     interviews_today: int
     interviews_total_limit: int | None
     interviews_daily_limit: int | None
+    app_access_blocked: bool
+    app_access_message: str | None
 
 
 class SubscriptionActivate(BaseModel):
@@ -100,6 +104,8 @@ class RoundOut(BaseModel):
 class AdminUserSummary(BaseModel):
     id: int
     email: str
+    username: str | None
+    password_storage: str
     full_name: str | None
     is_admin: bool
     created_at: datetime
