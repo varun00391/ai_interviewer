@@ -37,6 +37,7 @@ class UserMeOut(BaseModel):
     interviews_daily_limit: int | None
     app_access_blocked: bool
     app_access_message: str | None
+    stt_deepgram_available: bool = False
 
 
 class SubscriptionActivate(BaseModel):
@@ -59,13 +60,13 @@ class LoginRequest(BaseModel):
 
 
 class SessionCreate(BaseModel):
-    role_title: str = Field(default="Practice session", max_length=512)
+    role_title: str = Field(default="", max_length=512)
     flow_type: str = Field(default="full", pattern="^(full|single)$")
     single_round_type: str | None = None
 
 
 class SessionUpdate(BaseModel):
-    role_title: str | None = Field(default=None, min_length=2, max_length=512)
+    role_title: str | None = Field(default=None, max_length=512)
     mode: str | None = Field(default=None, pattern="^(full|per_round)$")
     flow_type: str | None = Field(default=None, pattern="^(full|single)$")
     single_round_type: str | None = None
@@ -76,6 +77,7 @@ class SessionOut(BaseModel):
     user_id: int
     role_title: str
     resume_summary: str | None
+    resume_structured: dict[str, Any] | None = None
     mode: str
     flow_type: str | None = None
     single_round_type: str | None = None
@@ -100,6 +102,29 @@ class RoundOut(BaseModel):
     completed_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class RoundRecapOut(BaseModel):
+    id: int
+    round_type: str
+    questions: list[Any] | None = None
+    answers: list[Any] | None = None
+    score_overall: float | None
+    score_breakdown: dict[str, Any] | None
+    improvements: list[str] | None
+    analytics: dict[str, Any] | None
+    completed_at: datetime | None
+    technical_code_preview: str | None = None
+
+
+class SessionRecapOut(BaseModel):
+    id: int
+    role_title: str
+    status: str
+    flow_type: str | None
+    hire_recommendation: dict[str, Any] | None
+    overall_score_hint: float | None = None
+    rounds: list[RoundRecapOut]
 
 
 class AdminUserSummary(BaseModel):

@@ -86,6 +86,56 @@ def summarize_resume(resume_text: str) -> str:
     )
 
 
+def extract_resume_structure(resume_text: str) -> dict[str, Any]:
+    """LLM JSON extraction: employers, roles, dates, education, skills, certs."""
+    from app.services.resume_structure import offline_extract_stub
+
+    text = (resume_text or "")[:14000]
+    if not _client():
+        return offline_extract_stub(text)
+
+    schema = """Return JSON only with this shape:
+{
+  "candidate_name": string | null,
+  "headline_or_summary_one_line": string | null,
+  "work_experience": [
+    {
+      "company": string,
+      "title": string,
+      "location": string | null,
+      "start_date": string | null,
+      "end_date": string | null,
+      "is_current": boolean,
+      "highlights": string[]
+    }
+  ],
+  "education": [
+    { "institution": string, "degree": string | null, "field": string | null, "end_year": number | null }
+  ],
+  "skills": string[],
+  "certifications": string[],
+  "languages": string[]
+}
+Use ISO-like dates when possible (YYYY-MM). is_current true only for present role."""
+
+    data = _chat_json(
+        [
+            {
+                "role": "system",
+                "content": "You extract structured resume facts. Be conservative; use null if unknown.",
+            },
+            {"role": "user", "content": f"Resume text:\n\n{text}\n\n{schema}"},
+        ],
+        temperature=0.1,
+    )
+    if not data or not isinstance(data, dict):
+        return offline_extract_stub(text)
+    for key in ("work_experience", "education", "skills", "certifications", "languages"):
+        if not isinstance(data.get(key), list):
+            data[key] = []
+    return data
+
+
 def generate_questions(
     round_type: str,
     role_title: str,

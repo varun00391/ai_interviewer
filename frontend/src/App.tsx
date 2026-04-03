@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import InterviewPrep from "./pages/InterviewPrep";
 import InterviewRoom from "./pages/InterviewRoom";
 import Landing from "./pages/Landing";
+import SessionRecap from "./pages/SessionRecap";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 
@@ -65,6 +66,14 @@ export default function App() {
         element={
           <Private>
             <InterviewRoom />
+          </Private>
+        }
+      />
+      <Route
+        path="/app/session/:sessionId/recap"
+        element={
+          <Private>
+            <SessionRecap />
           </Private>
         }
       />

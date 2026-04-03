@@ -63,6 +63,7 @@ class InterviewSession(Base):
     resume_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     resume_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     resume_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resume_structured: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     mode: Mapped[str] = mapped_column(String(32), default=InterviewMode.full.value)
     flow_type: Mapped[str] = mapped_column(String(16), default="full")
     single_round_type: Mapped[str | None] = mapped_column(String(32), nullable=True)

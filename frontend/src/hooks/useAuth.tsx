@@ -26,6 +26,7 @@ export type AuthUser = {
   interviews_daily_limit: number | null;
   app_access_blocked: boolean;
   app_access_message: string | null;
+  stt_deepgram_available?: boolean;
 };
 
 type Ctx = {

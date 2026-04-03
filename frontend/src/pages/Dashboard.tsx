@@ -55,7 +55,7 @@ export default function Dashboard() {
     setBusy(true);
     try {
       const { data } = await api.post<Session>("/sessions", {
-        role_title: "Practice session",
+        role_title: "",
         flow_type: "full",
         single_round_type: null,
       });
@@ -211,14 +211,15 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-3">
               {sessions.map((s) => (
-                <Link
+                <div
                   key={s.id}
-                  to={`/app/session/${s.id}`}
-                  className="block glass rounded-2xl p-5 hover:border-fuchsia-300/50 border border-transparent transition"
+                  className="glass rounded-2xl p-5 border border-transparent hover:border-fuchsia-300/50 transition"
                 >
-                  <div className="flex justify-between gap-4 flex-wrap">
-                    <div>
-                      <div className="font-semibold text-ink">{s.role_title}</div>
+                  <div className="flex justify-between gap-4 flex-wrap items-start">
+                    <Link to={`/app/session/${s.id}`} className="flex-1 min-w-0">
+                      <div className="font-semibold text-ink">
+                        {s.role_title.trim() ? s.role_title : "Role not set yet"}
+                      </div>
                       <div className="text-xs text-mist mt-1">
                         {s.flow_type === "single"
                           ? "Single round focus"
@@ -228,12 +229,26 @@ export default function Dashboard() {
                         · {s.status}
                         {s.disqualified ? " · Stopped (integrity)" : ""}
                       </div>
+                    </Link>
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      {s.status === "completed" && (
+                        <Link
+                          to={`/app/session/${s.id}/recap`}
+                          className="text-sm font-semibold text-emerald-700 hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Recap
+                        </Link>
+                      )}
+                      <Link
+                        to={`/app/session/${s.id}`}
+                        className="text-sm text-fuchsia-600 font-medium"
+                      >
+                        Open →
+                      </Link>
                     </div>
-                    <span className="text-sm text-fuchsia-600 font-medium">
-                      Open →
-                    </span>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           )}

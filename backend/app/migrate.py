@@ -17,6 +17,7 @@ def run_sql_migrations() -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_ends_at TIMESTAMP",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(80)",
         """ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS hire_recommendation JSONB""",
+        """ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS resume_structured JSONB""",
     ]
     try:
         with engine.begin() as conn:

@@ -19,6 +19,7 @@ from app.models import (
     User,
 )
 from app.services.integrity import analyze_interview_frame_jpeg_b64
+from app.services.interview_context import effective_role_title, resume_text_for_prompt
 from app.services.llm import (
     decide_follow_up,
     generate_questions,
@@ -135,7 +136,7 @@ async def _finalize_and_notify_round(
 
     scored = score_round_answers(
         live.round_type,
-        sess.role_title,
+        effective_role_title(sess.role_title),
         qa_pairs,
         live.technical_code if live.round_type == RoundType.technical.value else None,
         "[whiteboard image attached]" if live.whiteboard_data_url else None,
@@ -189,7 +190,9 @@ async def _finalize_and_notify_round(
                     }
                 )
         if rounds_payload:
-            full = score_full_interview(sess.role_title, rounds_payload)
+            full = score_full_interview(
+                effective_role_title(sess.role_title), rounds_payload
+            )
             _persist_hire_from_full(sess, full)
         else:
             full = {
@@ -237,7 +240,9 @@ async def _finalize_and_notify_round(
                         "analytics": r.analytics,
                     }
                 )
-        full = score_full_interview(sess.role_title, rounds_payload)
+        full = score_full_interview(
+            effective_role_title(sess.role_title), rounds_payload
+        )
         _persist_hire_from_full(sess, full)
         sess.status = SessionStatus.completed.value
         db.commit()
@@ -433,8 +438,8 @@ async def interview_ws(websocket: WebSocket):
                     n = _question_count()
                     qs = generate_questions(
                         round_type,
-                        sess.role_title,
-                        sess.resume_summary or "",
+                        effective_role_title(sess.role_title),
+                        resume_text_for_prompt(sess),
                         n,
                     )
                     if len(qs) > n:
@@ -535,8 +540,8 @@ async def interview_ws(websocket: WebSocket):
                         decision = await asyncio.to_thread(
                             decide_follow_up,
                             live.round_type,
-                            sess.role_title,
-                            sess.resume_summary or "",
+                            effective_role_title(sess.role_title),
+                            resume_text_for_prompt(sess),
                             qtext,
                             text,
                         )

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     groq_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     groq_vision_model: str = "llama-3.2-11b-vision-preview"
 
+    deepgram_api_key: str | None = None  # DEEPGRAM_API_KEY — server-side STT
+
     upload_dir: str = "/app/uploads"
     silence_ms_hint: int = 5000
     questions_per_round_min: int = 5

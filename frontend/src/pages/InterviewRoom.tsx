@@ -9,8 +9,9 @@ import {
   RadarChart,
   ResponsiveContainer,
 } from "recharts";
-import { loadStoredToken, wsInterviewUrl } from "../api";
+import { api, loadStoredToken, wsInterviewUrl } from "../api";
 import { StructuredInsight } from "../components/StructuredInsight";
+import { useAuth } from "../hooks/useAuth";
 import Whiteboard from "../components/Whiteboard";
 
 type ChatLine = { role: "user" | "assistant"; text: string };
@@ -21,6 +22,7 @@ const CAMERA_INTERVAL_MS = 8000;
 const POST_TTS_LISTEN_MS = 400;
 
 export default function InterviewRoom() {
+  const { user } = useAuth();
   const { sessionId, round } = useParams();
   const sid = Number(sessionId);
   const roundType = String(round || "hr");
@@ -56,6 +58,11 @@ export default function InterviewRoom() {
   const expectingAnswerRef = useRef(false);
   const roundActiveRef = useRef(false);
   const finishingRef = useRef(false);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunkPartsRef = useRef<BlobPart[]>([]);
+  const deepgramAvailableRef = useRef(false);
+  deepgramAvailableRef.current = Boolean(user?.stt_deepgram_available);
   const codeRef = useRef(code);
   const wbRef = useRef(wb);
   const roundTypeRef = useRef(roundType);
@@ -95,6 +102,12 @@ export default function InterviewRoom() {
 
   const stopRec = useCallback(() => {
     try {
+      mediaRecorderRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    mediaRecorderRef.current = null;
+    try {
       recRef.current?.stop();
     } catch {
       /* ignore */
@@ -103,12 +116,67 @@ export default function InterviewRoom() {
     setListening(false);
   }, []);
 
-  const flushAnswer = useCallback(() => {
+  const startDeepgramRecording = useCallback(() => {
+    if (!deepgramAvailableRef.current || !audioStreamRef.current) return;
+    try {
+      audioChunkPartsRef.current = [];
+      const stream = audioStreamRef.current;
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+      const mr = new MediaRecorder(stream, { mimeType: mime });
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunkPartsRef.current.push(e.data);
+      };
+      mr.start(400);
+      mediaRecorderRef.current = mr;
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const flushAnswer = useCallback(async () => {
     const w = wsRef.current;
     if (!w || w.readyState !== WebSocket.OPEN) return;
-    const text =
+    let text =
       committedRef.current.trim() ||
       (useTextFallbackRef.current ? manualText.trim() : "");
+
+    const dg = deepgramAvailableRef.current;
+    const mr = mediaRecorderRef.current;
+    if (dg && mr && mr.state !== "inactive") {
+      await new Promise<void>((resolve) => {
+        mr.onstop = () => resolve();
+        try {
+          mr.stop();
+        } catch {
+          resolve();
+        }
+      });
+      mediaRecorderRef.current = null;
+      const blob = new Blob(audioChunkPartsRef.current, {
+        type: mr.mimeType || "audio/webm",
+      });
+      audioChunkPartsRef.current = [];
+      if (blob.size > 800) {
+        try {
+          const fd = new FormData();
+          fd.append("file", blob, "answer.webm");
+          const { data } = await api.post<{ text?: string }>("/asr/transcribe", fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          const dgText = String(data?.text || "").trim();
+          if (dgText.length >= 2 && dgText.length > text.length) {
+            text = dgText;
+          } else if (!text && dgText.length >= 2) {
+            text = dgText;
+          }
+        } catch {
+          /* keep browser STT text */
+        }
+      }
+    }
+
     if (!text) return;
     sendSnapshot();
     w.send(JSON.stringify({ type: "user_final", text }));
@@ -125,12 +193,12 @@ export default function InterviewRoom() {
   const resetSilence = useCallback(() => {
     if (silenceRef.current) clearTimeout(silenceRef.current);
     silenceRef.current = setTimeout(() => {
-      if (
-        expectingAnswerRef.current &&
-        committedRef.current.trim() &&
-        !useTextFallbackRef.current
-      ) {
-        flushAnswer();
+      if (!expectingAnswerRef.current || useTextFallbackRef.current) return;
+      const hasBrowserText = committedRef.current.trim().length > 0;
+      const mayHaveDeepgram =
+        deepgramAvailableRef.current && audioStreamRef.current;
+      if (hasBrowserText || mayHaveDeepgram) {
+        void flushAnswer();
       }
     }, SILENCE_MS);
   }, [flushAnswer]);
@@ -198,7 +266,24 @@ export default function InterviewRoom() {
   const startListeningRef = useRef(startListening);
   startListeningRef.current = startListening;
 
-  const finishInterview = useCallback(() => {
+  useEffect(() => {
+    if (!user?.stt_deepgram_available) return;
+    let stream: MediaStream | null = null;
+    void (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
+      } catch {
+        audioStreamRef.current = null;
+      }
+    })();
+    return () => {
+      stream?.getTracks().forEach((t) => t.stop());
+      audioStreamRef.current = null;
+    };
+  }, [user?.stt_deepgram_available]);
+
+  const finishInterview = useCallback(async () => {
     const w = wsRef.current;
     if (!w || w.readyState !== WebSocket.OPEN || finishingRef.current) return;
     finishingRef.current = true;
@@ -208,7 +293,7 @@ export default function InterviewRoom() {
       postTtsListenTimerRef.current = null;
     }
     window.speechSynthesis.cancel();
-    stopRec();
+
     let partial = "";
     if (expectingAnswerRef.current) {
       if (useTextFallbackRef.current) {
@@ -218,6 +303,38 @@ export default function InterviewRoom() {
           liveTranscriptRef.current.trim() || committedRef.current.trim();
       }
     }
+
+    const dg = deepgramAvailableRef.current;
+    const mr = mediaRecorderRef.current;
+    if (!partial && dg && mr && mr.state !== "inactive") {
+      await new Promise<void>((resolve) => {
+        mr.onstop = () => resolve();
+        try {
+          mr.stop();
+        } catch {
+          resolve();
+        }
+      });
+      mediaRecorderRef.current = null;
+      const blob = new Blob(audioChunkPartsRef.current, {
+        type: mr.mimeType || "audio/webm",
+      });
+      audioChunkPartsRef.current = [];
+      if (blob.size > 800) {
+        try {
+          const fd = new FormData();
+          fd.append("file", blob, "finish.webm");
+          const { data } = await api.post<{ text?: string }>("/asr/transcribe", fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          partial = String(data?.text || "").trim();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    stopRec();
     setStatus("Wrapping up and scoring your interview…");
     w.send(
       JSON.stringify({
@@ -348,7 +465,12 @@ export default function InterviewRoom() {
           postTtsListenTimerRef.current = window.setTimeout(() => {
             postTtsListenTimerRef.current = null;
             if (ignoreWsRef.current || !expectingAnswerRef.current) return;
-            setStatus("Listening… pause ~5s after speaking to send your answer.");
+            startDeepgramRecording();
+            setStatus(
+              deepgramAvailableRef.current
+                ? "Listening… speak clearly; pause ~5s when done (Deepgram + browser assist)."
+                : "Listening… pause ~5s after speaking to send your answer."
+            );
             startListeningRef.current();
           }, POST_TTS_LISTEN_MS);
         });
@@ -405,7 +527,7 @@ export default function InterviewRoom() {
       stopRec();
       if (silenceRef.current) clearTimeout(silenceRef.current);
     };
-  }, [sid, roundType, speakThen, stopRec]);
+  }, [sid, roundType, speakThen, stopRec, startDeepgramRecording]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -513,7 +635,7 @@ export default function InterviewRoom() {
               <button
                 type="button"
                 disabled={finishing}
-                onClick={finishInterview}
+                onClick={() => void finishInterview()}
                 className="text-xs font-semibold px-3 py-1.5 rounded-full border border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100 disabled:opacity-50"
               >
                 {finishing ? "Finishing…" : "Finish interview"}
@@ -587,7 +709,7 @@ export default function InterviewRoom() {
                   type="button"
                   onClick={() => {
                     committedRef.current = manualText;
-                    flushAnswer();
+                    void flushAnswer();
                   }}
                   className="px-4 py-2 rounded-full bg-ink text-white text-xs font-semibold"
                 >
@@ -740,6 +862,14 @@ export default function InterviewRoom() {
                 <StructuredInsight data={roundDone.analytics} title="Round insights" />
               </div>
             )}
+            <div className="flex flex-wrap gap-3 pt-2">
+              <Link
+                to={`/app/session/${sid}/recap`}
+                className="inline-flex px-4 py-2 rounded-full border border-emerald-600 text-emerald-800 text-sm font-semibold hover:bg-emerald-50"
+              >
+                View saved recap (all Q&amp;A &amp; feedback)
+              </Link>
+            </div>
           </div>
         )}
 
@@ -857,12 +987,20 @@ export default function InterviewRoom() {
                 <StructuredInsight data={allDone.analytics} title="Overall insights" />
               </div>
             )}
-            <Link
-              to="/app"
-              className="inline-flex mt-2 px-4 py-2 rounded-full bg-accent text-white text-sm font-semibold"
-            >
-              Back to dashboard
-            </Link>
+            <div className="flex flex-wrap gap-3 mt-2">
+              <Link
+                to={`/app/session/${sid}/recap`}
+                className="inline-flex px-4 py-2 rounded-full border border-emerald-600 text-emerald-800 text-sm font-semibold hover:bg-emerald-50"
+              >
+                Full recap page
+              </Link>
+              <Link
+                to="/app"
+                className="inline-flex px-4 py-2 rounded-full bg-accent text-white text-sm font-semibold"
+              >
+                Back to dashboard
+              </Link>
+            </div>
           </div>
         )}
       </div>

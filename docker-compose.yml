@@ -27,6 +27,7 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-meta-llama/llama-4-scout-17b-16e-instruct}
       GROQ_VISION_MODEL: ${GROQ_VISION_MODEL:-llama-3.2-11b-vision-preview}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
     volumes:
       - uploads:/app/uploads
     depends_on:

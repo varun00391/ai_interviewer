@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
+import { StructuredInsight } from "../components/StructuredInsight";
 
 type Session = {
   id: number;
   role_title: string;
   resume_summary: string | null;
+  resume_structured?: Record<string, unknown> | null;
   mode: string;
   flow_type?: string | null;
   single_round_type?: string | null;
@@ -97,15 +99,11 @@ export default function InterviewPrep() {
   }
 
   async function savePreferences() {
-    if (!roleTitle.trim() || roleTitle.trim().length < 2) {
-      setMsg("Please enter a role (at least 2 characters).");
-      return;
-    }
     setSaving(true);
     setMsg(null);
     try {
       await api.patch(`/sessions/${id}`, {
-        role_title: roleTitle.trim(),
+        role_title: roleTitle.trim() || "",
         flow_type: flowType,
         single_round_type: flowType === "single" ? singleRound : null,
       });
@@ -158,6 +156,8 @@ export default function InterviewPrep() {
     ? ROUNDS.filter((r) => r.key === effectiveSingle)
     : ROUNDS;
 
+  const hasCompletedRound = rounds.some((x) => x.completed_at);
+
   return (
     <div className="min-h-screen bg-surface">
       <div className="max-w-6xl mx-auto px-4 py-8 lg:flex lg:gap-8">
@@ -165,6 +165,14 @@ export default function InterviewPrep() {
           <Link to="/app" className="text-sm text-accent font-medium inline-block">
             ← Back to home
           </Link>
+          {hasCompletedRound && (
+            <Link
+              to={`/app/session/${id}/recap`}
+              className="block text-sm font-semibold text-emerald-700 hover:underline"
+            >
+              View full recap (Q&amp;A &amp; feedback)
+            </Link>
+          )}
 
           <div className="glass rounded-3xl p-6 space-y-5 sticky top-6">
             <h2 className="font-display font-semibold text-lg text-ink">
@@ -200,10 +208,13 @@ export default function InterviewPrep() {
               </label>
               <input
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                placeholder="e.g. Backend engineer"
+                placeholder="Enter the job title you want to practice for"
                 value={roleTitle}
                 onChange={(e) => setRoleTitle(e.target.value)}
               />
+              <p className="text-[10px] text-mist mt-1">
+                Leave blank until you know the role; you can save and upload a resume first.
+              </p>
             </div>
 
             <div>
@@ -285,7 +296,9 @@ export default function InterviewPrep() {
         <main className="flex-1 min-w-0 space-y-6">
           <div className="glass rounded-3xl p-8">
             <h1 className="font-display text-2xl font-bold text-ink mb-2">
-              {session.role_title}
+              {session.role_title.trim()
+                ? session.role_title
+                : "Your interview session"}
             </h1>
             <p className="text-sm text-mist mb-4">
               {flowType === "single"
@@ -302,6 +315,35 @@ export default function InterviewPrep() {
                 {session.resume_summary}
               </div>
             )}
+            {session.resume_structured &&
+              typeof session.resume_structured === "object" && (
+                <div className="mt-4 space-y-4">
+                  {(session.resume_structured as Record<string, unknown>).extracted != null && (
+                    <div className="rounded-2xl border border-slate-200 bg-white/90 p-4">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">
+                        Structured profile
+                      </div>
+                      <StructuredInsight
+                        data={
+                          (session.resume_structured as Record<string, unknown>).extracted
+                        }
+                      />
+                    </div>
+                  )}
+                  {(session.resume_structured as Record<string, unknown>).inference != null && (
+                    <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
+                      <div className="text-xs font-bold uppercase tracking-wide text-violet-800 mb-2">
+                        Seniority &amp; tenure (inferred)
+                      </div>
+                      <StructuredInsight
+                        data={
+                          (session.resume_structured as Record<string, unknown>).inference
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
           </div>
 
           <div className="glass rounded-3xl p-8 space-y-4">
@@ -329,12 +371,22 @@ export default function InterviewPrep() {
                         </div>
                       )}
                     </div>
-                    <Link
-                      to={`/app/session/${id}/interview/${r.key}`}
-                      className="shrink-0 text-center px-4 py-2 rounded-full bg-accent text-white text-sm font-semibold"
-                    >
-                      {done(r.key) ? "Practice again" : "Start"}
-                    </Link>
+                    <div className="flex flex-col sm:items-end gap-2 shrink-0">
+                      {done(r.key) && (
+                        <Link
+                          to={`/app/session/${id}/recap`}
+                          className="text-center px-4 py-2 rounded-full border border-emerald-600 text-emerald-800 text-sm font-semibold hover:bg-emerald-50"
+                        >
+                          View recap
+                        </Link>
+                      )}
+                      <Link
+                        to={`/app/session/${id}/interview/${r.key}`}
+                        className="text-center px-4 py-2 rounded-full bg-accent text-white text-sm font-semibold"
+                      >
+                        {done(r.key) ? "Practice again" : "Start"}
+                      </Link>
+                    </div>
                   </div>
                 ))}
               </div>

@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import InterviewSession, User
 
 FREE_TOTAL_INTERVIEWS = 3
@@ -196,4 +197,5 @@ def user_me_payload(user: User, db: Session) -> dict[str, Any]:
         "interviews_daily_limit": daily_limit,
         "app_access_blocked": blocked,
         "app_access_message": lock_msg,
+        "stt_deepgram_available": bool(settings.deepgram_api_key),
     }
