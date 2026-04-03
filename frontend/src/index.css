@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+.glass {
+  @apply bg-white/70 backdrop-blur-xl border border-white/40 shadow-soft;
+}
+
+.gradient-hero {
+  background: radial-gradient(1200px 600px at 10% -10%, rgba(99, 102, 241, 0.35), transparent),
+    radial-gradient(900px 500px at 90% 0%, rgba(34, 211, 238, 0.28), transparent),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+}
+
+.landing-vibrant {
+  background: linear-gradient(165deg, #0f0a14 0%, #1a1025 35%, #0c1222 70%, #061016 100%);
+}
