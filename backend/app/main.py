@@ -10,7 +10,7 @@ from app.database import Base, engine, SessionLocal
 from app.interview_ws import router as ws_router
 from app.migrate import run_sql_migrations
 from app.models import User
-from app.routers import admin, asr, auth, rounds, sessions, subscriptions
+from app.routers import admin, asr, auth, rounds, sessions, subscriptions, tts
 from app.services.subscription import allocate_username, backfill_missing_usernames
 
 app = FastAPI(title="InterviewAI API", version="1.0.0")
@@ -27,6 +27,7 @@ app.include_router(auth.router)
 app.include_router(subscriptions.router)
 app.include_router(sessions.router)
 app.include_router(asr.router)
+app.include_router(tts.router)
 app.include_router(rounds.router)
 app.include_router(admin.router)
 app.include_router(ws_router)

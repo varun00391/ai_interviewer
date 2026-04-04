@@ -61,6 +61,8 @@ export default function InterviewRoom() {
   const audioStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunkPartsRef = useRef<BlobPart[]>([]);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsObjectUrlRef = useRef<string | null>(null);
   const deepgramAvailableRef = useRef(false);
   deepgramAvailableRef.current = Boolean(user?.stt_deepgram_available);
   const codeRef = useRef(code);
@@ -73,19 +75,67 @@ export default function InterviewRoom() {
   roundTypeRef.current = roundType;
   useTextFallbackRef.current = useTextFallback;
 
-  const speakThen = useCallback((text: string, onDone: () => void) => {
-    setLines((prev) => [...prev, { role: "assistant", text }]);
-    if (!("speechSynthesis" in window)) {
-      onDone();
-      return;
+  const stopTts = useCallback(() => {
+    try {
+      ttsAudioRef.current?.pause();
+    } catch {
+      /* ignore */
     }
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1;
-    u.onend = () => onDone();
-    u.onerror = () => onDone();
-    window.speechSynthesis.speak(u);
+    ttsAudioRef.current = null;
+    if (ttsObjectUrlRef.current) {
+      URL.revokeObjectURL(ttsObjectUrlRef.current);
+      ttsObjectUrlRef.current = null;
+    }
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   }, []);
+
+  const speakThen = useCallback(
+    (text: string, onDone: () => void) => {
+      setLines((prev) => [...prev, { role: "assistant", text }]);
+      stopTts();
+      void (async () => {
+        if (user?.tts_deepgram_available) {
+          try {
+            const res = await api.post("/tts/speak", { text }, { responseType: "blob" });
+            const blob = res.data as Blob;
+            if (blob instanceof Blob && blob.size > 512) {
+              const url = URL.createObjectURL(blob);
+              ttsObjectUrlRef.current = url;
+              const audio = new Audio(url);
+              ttsAudioRef.current = audio;
+              await new Promise<void>((resolve) => {
+                const done = () => {
+                  if (ttsObjectUrlRef.current === url) {
+                    URL.revokeObjectURL(url);
+                    ttsObjectUrlRef.current = null;
+                  }
+                  ttsAudioRef.current = null;
+                  resolve();
+                };
+                audio.onended = () => done();
+                audio.onerror = () => done();
+                void audio.play().catch(() => done());
+              });
+              onDone();
+              return;
+            }
+          } catch {
+            /* fall through to browser TTS */
+          }
+        }
+        if (!("speechSynthesis" in window)) {
+          onDone();
+          return;
+        }
+        const u = new SpeechSynthesisUtterance(text);
+        u.rate = 1;
+        u.onend = () => onDone();
+        u.onerror = () => onDone();
+        window.speechSynthesis.speak(u);
+      })();
+    },
+    [user?.tts_deepgram_available, stopTts]
+  );
 
   const sendSnapshot = useCallback(() => {
     const w = wsRef.current;
@@ -292,7 +342,7 @@ export default function InterviewRoom() {
       clearTimeout(postTtsListenTimerRef.current);
       postTtsListenTimerRef.current = null;
     }
-    window.speechSynthesis.cancel();
+    stopTts();
 
     let partial = "";
     if (expectingAnswerRef.current) {
@@ -349,7 +399,7 @@ export default function InterviewRoom() {
     setLive("");
     setManualText("");
     manualTextRef.current = "";
-  }, [stopRec]);
+  }, [stopRec, stopTts]);
 
   useEffect(() => {
     const token = loadStoredToken();
@@ -385,7 +435,7 @@ export default function InterviewRoom() {
         finishingRef.current = false;
         setFinishing(false);
         setDqReason(String(data.reason || "Session ended."));
-        window.speechSynthesis.cancel();
+        stopTts();
         stopRec();
         setStatus("Session stopped — integrity review.");
         return;
@@ -401,7 +451,7 @@ export default function InterviewRoom() {
               "Your subscription or free quota has ended. Renew to continue."
           )
         );
-        window.speechSynthesis.cancel();
+        stopTts();
         stopRec();
         setStatus("Access paused — renew your plan.");
         return;
@@ -451,7 +501,7 @@ export default function InterviewRoom() {
         committedRef.current = "";
         liveTranscriptRef.current = "";
         setLive("");
-        window.speechSynthesis.cancel();
+        stopTts();
         stopRec();
         speakThen(text, () => {
           expectingAnswerRef.current = true;
@@ -483,7 +533,7 @@ export default function InterviewRoom() {
         finishingRef.current = false;
         setFinishing(false);
         expectingAnswerRef.current = false;
-        window.speechSynthesis.cancel();
+        stopTts();
         stopRec();
         if (postTtsListenTimerRef.current) {
           clearTimeout(postTtsListenTimerRef.current);
@@ -523,11 +573,11 @@ export default function InterviewRoom() {
         postTtsListenTimerRef.current = null;
       }
       ws.close();
-      window.speechSynthesis.cancel();
+      stopTts();
       stopRec();
       if (silenceRef.current) clearTimeout(silenceRef.current);
     };
-  }, [sid, roundType, speakThen, stopRec, startDeepgramRecording]);
+  }, [sid, roundType, speakThen, stopRec, stopTts, startDeepgramRecording]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;

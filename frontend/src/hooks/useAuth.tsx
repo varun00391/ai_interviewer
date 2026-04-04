@@ -27,6 +27,7 @@ export type AuthUser = {
   app_access_blocked: boolean;
   app_access_message: string | null;
   stt_deepgram_available?: boolean;
+  tts_deepgram_available?: boolean;
 };
 
 type Ctx = {

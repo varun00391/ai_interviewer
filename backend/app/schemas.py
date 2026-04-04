@@ -38,6 +38,7 @@ class UserMeOut(BaseModel):
     app_access_blocked: bool
     app_access_message: str | None
     stt_deepgram_available: bool = False
+    tts_deepgram_available: bool = False
 
 
 class SubscriptionActivate(BaseModel):

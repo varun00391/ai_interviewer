@@ -198,4 +198,5 @@ def user_me_payload(user: User, db: Session) -> dict[str, Any]:
         "app_access_blocked": blocked,
         "app_access_message": lock_msg,
         "stt_deepgram_available": bool(settings.deepgram_api_key),
+        "tts_deepgram_available": bool(settings.deepgram_api_key),
     }
